@@ -1,0 +1,244 @@
+---
+title: 'Austin Pets Alive: Top Volunteers'
+author: "Hunter Ratliff"
+date: "November 6, 2015"
+output: 
+  html_document:
+    theme: united
+
+---
+
+
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figures/',
+                      echo=FALSE, warning=FALSE, message=FALSE, fig.align='center')
+```
+
+```{r Load proper enviroment, include=F}
+# setwd("~/Google Drive/100 - Publicly hosted/rootR/Austin Pets Alive")
+# knitr::opts_knit$set(root.dir = "../..")
+suppressPackageStartupMessages(require(dplyr))
+suppressPackageStartupMessages(require(lubridate))
+suppressPackageStartupMessages(require(ggplot2))
+suppressPackageStartupMessages(require(ggthemes))
+source("~/Google Drive/100 - Publicly hosted/rootR/Citations/Citation Function.R")
+
+# citation.apa = function (text="") {
+#   ## Required packages
+#   suppressPackageStartupMessages(require(grid))
+#   suppressPackageStartupMessages(require(gridExtra))
+#   suppressPackageStartupMessages(require(stringi))
+#   suppressPackageStartupMessages(require(lubridate))
+#   
+#   #   
+#   # Orange  :: #F05B49
+#   # Green   :: #6299A0
+#   # DarkGrn :: #007371
+#   # LigtGrn :: #C2E8EB
+#   grid.text(as.character("hunter.ratliff@austinpetsalive.org"), x=unit(0.995, "npc"), y=unit(0.005, "npc"), just=c("right", "bottom"), 
+#             gp=gpar(
+#               fontface = "italic", 
+#               family="Verdana",
+#               col = "#4D4D4D",
+#               cex=0.8)
+#   # )theme(plot.title = element_text(family="American Typewriter", color = "#DD5928"),
+#          # axis.title = element_text(family="Verdana", color = "#5BC002", face = "bold")
+#   )
+#   grid.text(as.character(text), x=unit(0.995, "npc"), y=unit(0.995, "npc"), just=c("right", "top"), 
+#             gp=gpar(
+#               # fontface = "bold", 
+#               family="American Typewriter",
+#               col = "#5BC002",
+#               cex=1.15)
+#   )
+#   grid.text(paste("Created on", as.character(today())), x=unit(0.005, "npc"), y=unit(0.005, "npc"), just=c("left", "bottom"), 
+#             gp=gpar(col = "#DD5928", cex=0.75))
+# }
+```
+
+```{r Build data.frames}
+users.full <- read.csv("~/Google Drive/100 - Publicly hosted/rootR/Austin Pets Alive/Data/users/users.csv", na.strings="") %>%
+  filter(MemberInfo...Status!="Applicant") %>%
+  mutate(LastLogin = mdy_hms(LastLoginDate))
+
+users <- read.csv("~/Google Drive/100 - Publicly hosted/rootR/Austin Pets Alive/Data/users/users.csv", na.strings="") %>% 
+  select(First=FirstName, Last=LastName, 
+         Hours=HoursWorked, Login=LastLoginDate, 
+         Email=EmailAddress, Status=MemberInfo...Status) %>% 
+  filter(Status!="Applicant") %>%
+  arrange(desc(Hours)) %>%
+  mutate(Name = paste(First, Last)) %>% 
+  select(-First, -Last) %>%
+  mutate(Rank = n() + 1 - row_number(Hours),
+         DenR = dense_rank(Hours),
+         HundredRank = 1-round(percent_rank(Hours), 2) + 0.01)
+users$Status <- factor(users$Status)
+
+df <- users
+df$Group <- "Has no hours"
+df$Group[df$Hours > 0] <- "Has hours"
+df$Group[df$HundredRank <= 0.25] <- "Top 25%"
+df$Group[df$HundredRank <= 0.10] <- "Top 10%"
+df$Group[df$HundredRank <= 0.01] <- "Top 1%"
+```
+
+From Volunteer Profile Export of **`r nrow(users.full)` volunteers**, *`r nrow(subset(users.full, MemberInfo...Status=="Accepted"))`* are active volunteers. The average *active* volunteer has a median of **`r round(median(subset(users.full, MemberInfo...Status=="Accepted")$HoursWorked), 3)` hours logged**
+
+
+## Plots
+### Plot #1
+```{r Top One Percent of Volunteers}
+users %>%
+  filter(HundredRank<0.02) %>%
+  mutate(dens = dense_rank(Hours)) %>%
+  ggplot(aes (x=Hours, y=Rank, label=Name)) +
+  geom_text(aes(color=log(Hours), hjust=0, size=log(Hours), family="Georgia")) + 
+  geom_rug(sides = "b", color="#DD5928") +
+  scale_y_reverse() + scale_x_reverse() + 
+  scale_color_continuous(low="#4D4D4D", high="#819E15") +
+  ggtitle("Austin Pets Alive Volunteers:\nTop 1% of Volunteers by All Time Hours") + 
+  theme_gdocs() + guides(size=F, color=F) + 
+  theme(plot.title = element_text(family="American Typewriter", color = "#DD5928"),
+        axis.title = element_text(family="Verdana", color = "#5BC002", face = "bold")
+        )
+citation.apa()
+```
+
+---
+
+### Plot #2
+
+```{r Breakdown of all APA Volunteers}
+qplot(data=df, x=Rank, y=Hours, color=Group, shape=Status, geom="jitter") + 
+  labs(x="Rank by All Time Hours", y="All\nTime\nHours\nLogged", 
+       title="Breakdown of all APA volunteers") + 
+  scale_color_manual(
+    values = c("Has no hours"="#4D4D4D", "Has hours"="#E78403", "Top 25%"="#DD5928", 
+               "Top 10%"="#A7C539", "Top 1%"="#19679F")) + theme_gdocs() + theme(
+  axis.title = element_text(family="Verdana", color = "#5BC002", face = "bold"),
+  plot.title = element_text(hjust = 0, size = rel(1.5), face = "bold", family="American Typewriter", color = "#DD5928"))
+citation.apa()  
+```
+
+```{r Breakdown of all APA Volunteers - Top 500}
+qplot(data=df, x=Rank, y=Hours, color=Group, shape=Status, geom="jitter") + 
+  labs(x="Rank by All Time Hours", y="All\nTime\nHours\nLogged", 
+       title="Breakdown of all APA volunteers: Top 500") + 
+  scale_color_manual(
+    values = c("Has no hours"="#4D4D4D", "Has hours"="#E78403", "Top 25%"="#DD5928", 
+               "Top 10%"="#A7C539", "Top 1%"="#19679F")) + theme_gdocs() + theme(
+  axis.title = element_text(family="Verdana", color = "#5BC002", face = "bold"),
+  plot.title = element_text(hjust = 0, size = rel(1.5), face = "bold", family="American Typewriter", color = "#DD5928")) + xlim(c(0,500)) + scale_y_continuous(breaks=c(1:20)*200)
+citation.apa()  
+```
+
+```{r Breakdown of all APA Volunteers - Top 200}
+qplot(data=df, x=Rank, y=Hours, color=Group, shape=Status, geom="jitter") + 
+  labs(x="Rank by All Time Hours", y="All\nTime\nHours\nLogged", 
+       title="Breakdown of all APA volunteers: Top 200") + 
+  scale_color_manual(
+    values = c("Has no hours"="#4D4D4D", "Has hours"="#E78403", "Top 25%"="#DD5928", 
+               "Top 10%"="#A7C539", "Top 1%"="#19679F")) + theme_gdocs() + theme(
+  axis.title = element_text(family="Verdana", color = "#5BC002", face = "bold"),
+  plot.title = element_text(hjust = 0, size = rel(1.5), face = "bold", family="American Typewriter", color = "#DD5928")) + xlim(c(0,200)) + scale_y_continuous(breaks=c(1:20)*200)
+citation.apa()  
+```
+
+```{r Breakdown of all APA Volunteers - Top 100}
+qplot(data=df, x=Rank, y=Hours, color=Group, shape=Status, geom="jitter") + 
+  labs(x="Rank by All Time Hours", y="All\nTime\nHours\nLogged", 
+       title="Breakdown of all APA volunteers: Top 100") + 
+  scale_color_manual(
+    values = c("Has no hours"="#4D4D4D", "Has hours"="#E78403", "Top 25%"="#DD5928", 
+               "Top 10%"="#A7C539", "Top 1%"="#19679F")) + theme_gdocs() + theme(
+  axis.title = element_text(family="Verdana", color = "#5BC002", face = "bold"),
+  plot.title = element_text(hjust = 0, size = rel(1.5), face = "bold", family="American Typewriter", color = "#DD5928")) + xlim(c(0,100)) + scale_y_continuous(breaks=c(1:20)*200)
+citation.apa()  
+```
+
+---
+
+### Plot #3
+
+```{r Boxplot of APA Volunteers Hours Logged by status}
+ggplot(subset(df, Hours>0), aes(x=Group, y=Hours)) +
+  geom_jitter(alpha=.2, aes(fill=Status)) + 
+  geom_boxplot(alpha=0.5, aes(fill=Status)) + 
+  labs(x="", y="Hours\nLogged", title="APA Volunteers: By Status") + 
+  facet_wrap("Group", scales="free") + 
+  scale_fill_manual(
+    values = c("Archived"="#DD5928", "Accepted"="#A7C539")) + theme_gdocs() + 
+  theme(
+        axis.title = element_text(family="Verdana", color = "#DD5928", face = "bold"),
+        plot.title = element_text(hjust = 0, size = rel(1.5), face = "bold", family="American Typewriter", color = "#DD5928"),
+        strip.background = element_rect(fill="#4D4D4D"),
+        strip.text = element_text(family="Verdana", color = "#5BC002", face = "bold")
+        )
+citation.apa() 
+```
+
+## Table
+
+```{r Table}
+top_n(df, 25, Hours) %>% 
+  select(Rank, Name, Hours) %>% 
+  mutate(Hours = round(Hours)) %>%
+  knitr::kable()
+
+```
+
+```{r}
+# require(devtools)
+# install_github("ropensci/gender")
+require(gender)
+# help(gender)
+
+
+# setwd("")
+# source("../Citations/Citation-APA.R")
+
+# as.data.frame(list(
+#   file.name = c("users.csv", "VolOppurtunities.csv", "ProfileBackground.csv", "VolQual.csv", "VolSimple.csv")),
+#   row.names = c("users", "users.oppr", "users.bckd", "users.qlfc", "users.smpl"))
+
+users      <- read.csv("~/Google Drive/100 - Publicly hosted/rootR/Austin Pets Alive/Data/users/users.csv", na.strings = "")
+users.oppr <- read.csv("~/Google Drive/100 - Publicly hosted/rootR/Austin Pets Alive/Data/users/VolOppurtunities.csv", na.strings = "")
+users.bckd <- read.csv("~/Google Drive/100 - Publicly hosted/rootR/Austin Pets Alive/Data/users/VolProfileBackground.csv", na.strings = "")
+users.qlfc <- read.csv("~/Google Drive/100 - Publicly hosted/rootR/Austin Pets Alive/Data/users/VolQual.csv", na.strings = "")
+users.smpl <- read.csv("~/Google Drive/100 - Publicly hosted/rootR/Austin Pets Alive/Data/users/VolSimple.csv", na.strings = "")
+
+
+```
+---
+## Contact
+
+**Hunter Ratliff**
+
+Created: November 6th, 2015   
+Contact: hunter.ratliff@austinpetsalive.org   
+Alternate Contact: hunterratliff1@gmail.com   
+Twitter: @HunterRatliff1   
+Permalink: <http://rpubs.com/HunterRatliff1/124076>
+
+
+```
+Copyright (C) 2015 Hunter Ratliff
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+```
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.

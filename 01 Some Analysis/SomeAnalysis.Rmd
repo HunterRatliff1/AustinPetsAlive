@@ -1,0 +1,429 @@
+---
+title: "Volunteer Hours"
+author: "Hunter Ratliff"
+date: "September 7, 2015"
+output: html_document
+---
+     
+# Functions   
+```{r TimeAgo function}
+sapply(c("ggplot2", "dplyr", "lubridate", "reshape2", "magrittr", "stringi", 
+         "gridExtra", "ggmap", "ggthemes", "scales", "pacman"), require, character.only=TRUE) 
+
+TimeAgo <- function (date_string, unit="d", num=1, fn="ymd") 
+{
+  # Required Packages
+  library(pacman)
+  require(lubridate)
+  require(magrittr)
+  require(dplyr)
+  
+  # Format the dates
+  if(fn=="ymd") {s <- as.Date(ymd(date_string), tz="UTC")}
+  if(fn=="mdy_hms") {s <- as.Date(mdy_hms(date_string), tz="UTC")}
+  e <- today(tzone = "UTC")     
+   
+  # Define the interval 
+  i <- ifelse(e < s,
+    interval(start=e, end=s, tzone = "UTC"),
+    interval(start=s, end=e, tzone = "UTC"))
+  
+  # Do math
+  if(unit=="y") {l<-(i+years(num)) %/% years(num)}   # If YEARS is the unit
+  if(unit=="m") {l<-(i+months(num)) %/% months(num)} # If MONTH is the unit
+  if(unit=="w") {l<-(i+weeks(num)) %/% weeks(num)}   # If WEEK is the unit
+  if(unit=="d") {l<-(i+days(num)) %/% days(num)}     # If DAYS is the unit
+  l   # value returned 
+
+### NOT RUN
+# > TimeAgo("2015-08-01")
+# [1] 39
+# > TimeAgo("2015-08-01",fn="ymd")
+# [1] 39
+# > TimeAgo("8/1/2015",fn="mdy")
+# [1] 39
+} 
+
+
+
+# Define the ggplot theme
+theme.titles <- theme(
+  axis.title.x = element_text(face="bold", colour="#DD5928", size=16),
+  axis.text.y  = element_text(angle=0, vjust=0.5, size=12),
+  axis.title.y = element_text(face="bold", colour="#A7C539", size=16),
+  axis.text.x  = element_text(angle=0, vjust=0.5, size=12),
+  plot.title   = element_text(lineheight=.8, size=24, face="bold", colour="#4D4D4D"))
+
+
+theme.map <- theme(
+  axis.title.x = element_text(colour="#819E15", size=16),
+  axis.text.y  = element_text(angle=0, vjust=0.5, colour="#4D4D4D", size=10),
+  axis.title.y = element_text(colour="#819E15", size=16),
+  axis.text.x  = element_text(angle=0, vjust=0.5, colour="#4D4D4D", size=10),
+  plot.title   = element_text(lineheight=.8, size=24, face="bold", colour="#DD5928"))
+```
+   
+# Load data
+## From 'Hours' export   
+```{r Load Hours, echo=F}
+# PACKAGES
+sapply(c("ggplot2", "dplyr", "lubridate", "reshape2", "magrittr", "stringi", 
+         "gridExtra", "ggmap", "ggthemes", "scales", "pacman"), require, character.only=TRUE) 
+
+
+Hours <- read.csv(file = "~/Google Drive/100 - Publicly hosted/rootR/Austin Pets Alive/data/hours.csv") %>%
+  
+  select(
+    -Username,
+    -starts_with("Created"), -contains("enter"), -contains("clock"), 
+    -contains("ReportGroup"), -contains("updated"), -contains("Entry")) %>%
+  
+  mutate(
+    vol.name     = paste(FirstName, LastName),
+    act.date     = mdy_hms(DateVolunteered),
+    act.hrs      = round(HoursWorked, digits=2)) %>% 
+  
+  select(-FirstName, -LastName, -HoursWorked, -DateVolunteered, -ActivityName) %>%
+  rename(uuid = DatabaseUserId,
+         act.category = ActivityCategoryName,
+         act.category.id = DatabaseActivityCategoryId,
+         act.id = DatabaseActivityId) %>%
+
+  filter(act.category != "APA! Staff") %>%
+  select(act.date, act.hrs, uuid, act.category.id, act.id, vol.name, act.category)      
+```
+  
+## From 'Users' export  
+```{r Load Users, echo=F}
+Users <- read.csv("~/Google Drive/100 - Publicly hosted/rootR/Austin Pets Alive/data/users.csv", na.strings = "")
+Users <- Users %>%
+  mutate(vol.address = paste(Address1, City, PostalCode),
+         vol.name    = paste(FirstName, LastName), 
+         vol.login.d = TimeAgo(LastLoginDate, unit="d", fn="mdy_hms"),
+         vol.orint.d = TimeAgo(Q...General...Orientation, unit="d", fn="ymd"),
+         vol.orint.d = ifelse(
+                              Q...General...Orientation=="RTR Training",
+                              TimeAgo(MemberInfo...DateJoined, unit="d", fn = "mdy_hms"),
+                              vol.orint.d),
+         vol.age = ifelse(!is.na(CF...General.Information...Date.of.Birth),
+                      TimeAgo(CF...General.Information...Date.of.Birth, unit="y", fn="mdy_hms"),
+                      TimeAgo(Birthday, unit="y", fn = "mdy_hms")),
+         vol.age = ifelse(vol.age < 13, NA, vol.age),
+         vol.age = ifelse(vol.age > 80, NA, vol.age)) %>%
+  
+  select(-Birthday, -CF...General.Information...Date.of.Birth, -LastLoginDate,
+         -ProfileCreated, -Q...General...Orientation, -MemberInfo...DateJoined,
+         -FirstName, -LastName, -Address1, -Username) %>%
+  
+  rename(uuid = DatabaseUserId, 
+         vol.dog.training = Q...Dog...Training.Level,
+         vol.status = MemberInfo...Status, 
+         vol.role = MemberInfo...SecurityRole,
+         vol.state = Province,
+         vol.zip = PostalCode,
+         vol.city = City)
+
+Users <- mutate(Users,
+  age_group =ifelse(vol.age < 20, "Teen", vol.age),
+  age_group =ifelse(vol.age>=20 & vol.age<30, "20s", age_group),
+  age_group =ifelse(vol.age>=30 & vol.age<40, "30s", age_group),
+  age_group =ifelse(vol.age>=40 & vol.age<50, "40s", age_group),
+  age_group =ifelse(vol.age>=50, "50+", age_group))  
+
+```  
+   
+   
+## Pulls from 'LatLong.csv'
+Merges geolocation to the `Users` df by the `uuid` column. Then merges new geocoded `Users` df with the `Hours` df (by `uuid`), resulting in the new df titled `safe_merge`.   
+
+```{r Geocode & merge, echo=F}
+# packages
+require(pacman)
+p_load(dplyr, magrittr, lubridate, ggmap, install=T)
+
+require(dplyr)
+require(magrittr)
+require(lubridate)
+require(ggplot2)
+require(ggmap)
+
+
+
+# Geocode Merge
+geo <- read.csv("~/Google Drive/*Scripts/DataVis/APA_vol_hours/LatLong.csv")
+Users <- left_join(Users, geo) %>% mutate(
+  X = ifelse(is.na(X), FALSE, TRUE)) %>% rename(has_geo = X)
+
+
+# Join - Hours
+safe_merge <- left_join(Hours, Users) %>%
+  mutate(
+    act.w   = week(act.date),
+    act.m   = month(act.date),
+    act.y   = year( act.date))
+
+safe_merge <-  filter(safe_merge, act.y < 2016)
+
+
+
+# # NOT RUN - GEO
+# group_by(df.v, hrs10) %>% summarise(avg = mean(vol.hrs))
+# temp <- group_by(Hours, uuid) %>% 
+#   summarise(totalHours = sum(hours)) %>% 
+#   filter(totalHours > 10) %>%
+#   left_join(Users) %>%
+#   select(uuid, address) %>%
+#   filter(!is.na(address)) %>%
+#   mutate(geo = geocode(address, source="google")) 
+```
+       
+
+Teams   
+```{r Teams}
+require(pacman)
+require(ggplot2)
+require(magrittr)
+require(dplyr)
+require(lubridate)
+require(ggplot2) 
+require(gridExtra)
+
+Teams <- select(Hours, act.date, act.hrs, uuid, act.category, act.category.id) %>%
+  group_by(act.category) %>% mutate(
+  team.NumberOfEntries = n(),
+  team.hours.total     = sum(act.hrs),
+  team.vol.count       = n_distinct(uuid))  %>%
+  select(-uuid, -act.hrs, -act.date) %>% unique() %>%
+  mutate(cat = grepl("Cat", act.category),
+         dog = grepl("Dog", act.category),
+         meta = ifelse(cat==T | dog ==T, ifelse(cat==T,"cat","dog"), "other")) %>%
+  select(-cat, -dog) %>%
+  rename(Activity = act.category, 
+         NumberOfEntries = team.NumberOfEntries, 
+         TeamHours = team.hours.total, 
+         NumVols = team.vol.count) %>%
+  select(-act.category.id)
+
+# # NOT RUN
+# names(Teams)
+# [1] "Activity"        "NumberOfEntries" "TeamHours"       "NumVols"         "meta" 
+
+
+
+
+
+
+# Info for each team
+summary(Teams$NumberOfEntries)
+
+ggplot(Teams, aes(y=NumberOfEntries, x=Activity)) + 
+  geom_bar(aes(fill=NumVols), stat = "identity") + 
+  scale_fill_gradient(low = "green", high = "red")  + facet_wrap("meta", scales = "free_y", ncol=1)
+
+
+summary(Teams$TeamHours)
+
+ggplot(Teams, aes(y=TeamHours, x=Activity)) + 
+  geom_bar(aes(fill=NumVols), stat = "identity") + 
+  scale_fill_gradient(low = "green", high = "red") + coord_flip()
+
+summary(Teams$NumVols)
+
+
+```
+   
+ 
+***   
+   
+```{r Density-Age}
+# Packages
+require(pacman)
+require(ggplot2)
+require(magrittr)
+require(dplyr)
+require(lubridate)
+require(ggplot2) 
+require(gridExtra)
+  
+
+# make df
+df <- group_by(safe_merge, uuid) %>% mutate(vol.hrs.all_time = sum(act.hrs)) %>% ungroup() %>%
+  mutate(AgeGroup = (vol.age%/%5)*5)
+
+# Density 1
+ggplot(df, aes(x=AgeGroup, y=vol.hrs.all_time)) + geom_bin2d() +
+  scale_fill_gradient(low = "red", high = "green") + 
+  scale_alpha(range = c(.1, 0.5), guide = FALSE)  + theme.titles
+
+# Density 2
+ggplot(df, aes(x=AgeGroup, y=vol.hrs.all_time)) + geom_density2d() + 
+  stat_density2d(size = 0.01, bins = 16, geom = "polygon", aes(fill = ..level.., alpha = ..level..)) + 
+  scale_fill_distiller(palette = "Spectral") + scale_x_continuous(breaks=c(1:14)*5) +
+  scale_alpha(range = c(0.3, 1), guide = FALSE) + theme.titles
+
+# Density 3
+mutate(df, vol.hrs.all_time = (vol.hrs.all_time%/%100)*100) %>%
+  group_by(AgeGroup, vol.hrs.all_time) %>% summarise(COUNT = n()) %>%
+  ggplot(aes(x=AgeGroup, y=vol.hrs.all_time)) + geom_tile(aes(fill = COUNT)) +
+  scale_fill_distiller(palette = "Spectral") +
+  scale_alpha(range = c(.1, 0.5), guide = FALSE) + theme.titles
+
+
+```
+#   mutate(cat = grepl("Cat", act.category),
+#         dog = grepl("Dog", act.category),
+#         meta = ifelse(cat==T | dog ==T, ifelse(cat==T,"cat","dog"), "other")) %>%
+#  select(-cat, -dog) %>%
+
+```{r geoGraph, eval=F}
+require(dplyr)
+require(magrittr)
+require(lubridate)
+require(ggplot2)
+require(ggmap)
+
+# DF GEO
+df2 <- select(df, -act.w, -act.m, -act.y, -act.date, -act.hrs) %>% 
+  filter(has_geo == TRUE) %>% unique() %>%
+  mutate(
+    rank    = rank(vol.hrs.all_time),
+    TenTile     = ntile(vol.hrs.all_time, 10),
+    densityRank = dense_rank(vol.hrs.all_time),
+    cat = grepl("Cat", act.category),
+    dog = grepl("Dog", act.category),
+    meta = ifelse(cat==T | dog ==T, ifelse(cat==T,"cat","dog"), "other")) %>% select(-cat, -dog)
+
+
+# BUILD BASE MAP
+require('RColorBrewer')             # refine breaks and palette
+YlOrBr <- c("#FFFFD4", "#FED98E", "#FE9929", "#D95F0E", "#993404")
+
+
+require('ggmap')                    # define map object
+map.in <- get_map(location = "austin", zoom = 12, maptype="roadmap")
+theme_set(theme_bw(base_size = 8))
+
+
+
+
+  
+# map 0
+ggmap(map.in) + geom_density2d(data=df2, aes(x=lon, y=lat), size=0.3) + 
+  stat_density2d(data=df2, size=0.01, bins=16, geom="polygon",
+    aes(x=lon, y=lat, fill=..level.., alpha=..level..)) +
+  scale_fill_gradient(name="xyz", space="Lab",
+                      low="red", high="green") + 
+  scale_alpha(range=c(.1, 0.5), guide=FALSE) +
+  labs(x="Longitude", y="Latitude") + ggtitle("") + coord_map()
+
+# NOT RUN
+## > names(df2)
+## [1] "uuid"             "act.category.id"  "act.id"           "vol.name"         "act.category"    
+## [6] "vol.city"         "vol.zip"          "vol.state"        "vol.role"         "vol.status"      
+## [11] "vol.dog.training" "vol.address"      "vol.login.d"      "vol.orint.d"      "vol.age"         
+## [16] "has_geo"          "address"          "lon"              "lat"              "vol.hrs.all_time"
+## [21] "AgeGroup"         "rank"             "TenTile"          "densityRank"      "meta"  
+
+# map 1
+map.bin.rank <- ggmap(map.in) %+% df2 +
+  aes(x=lon, y=lat,    z = rank) + 
+  stat_summary2d(fun = mean, alpha=0.6) +    # Adjust size w/ `binwidth = c(.02, .02)`
+
+  scale_fill_gradient(name="Mean of rank", space="Lab",
+                      # low="#4D4D4D", high="#819E15") + 
+                      low="red", high="green") + 
+  # scale_alpha(range=c(0.3, 0.5), guide=FALSE) +
+  labs(x="Longitude", y="Latitude") + ggtitle("Volunteers ranked by all time hours") + coord_map() +
+  theme.map
+print(map.bin.rank)
+
+# map 1
+map.bin.rank <- ggmap(map.in) %+% df2 +
+  aes(x=lon, y=lat,    z = rank) + 
+  stat_summary2d(fun = mean, alpha=0.6) +    # Adjust size w/ `binwidth = c(.02, .02)`
+
+  scale_fill_gradient(name="Mean of rank", space="Lab",
+                      # low="#4D4D4D", high="#819E15") + 
+                      low="red", high="green") + 
+  # scale_alpha(range=c(0.3, 0.5), guide=FALSE) +
+  labs(x="Longitude", y="Latitude") + ggtitle("Volunteers ranked by all time hours") + coord_map() +
+  theme.map
+print(map.bin.rank + facet_wrap("AgeGroup"))
+
+
+ggsave(filename = "VolRank_by_allTimeHours.png",
+       plot = map.bin.rank,
+       scale = 1,
+       width = 10, height = 10,
+       dpi = 300)
+```
+
+
+```{r Plot}
+require(pacman)
+require(ggplot2)
+require(magrittr)
+require(dplyr)
+require(lubridate)
+require(ggplot2) 
+require(gridExtra)
+
+# Define the data frame
+
+df <- group_by(
+  # For each team
+  df.join, act.category) %>% mutate(
+    team.vols = n_distinct(uuid),
+    team.hrs = sum(hours),
+    team.entries = n()) %>% ungroup() %>%
+  
+  # For each vol
+  group_by(uuid) %>% mutate(
+    vol.teams   = n_distinct(ActivityCategory),
+    vol.hrs     = sum(hours),
+    vol.entries = n(),
+    vol.range   = as.period(max(date) + days(1) - min(date)) %/% days(1)) %>% ungroup() %>%
+
+#     
+# Need to process this again - code out of date
+# 
+# # GGPLOT 1 - entries
+gg1 <- ggplot(df) + geom_histogram(aes(x=act.category)) + 
+  coord_flip() + theme.titles + ylab("Number of entries (per activity)")# + theme(legend.title)
+
+# # GGPLOT 2 - hours per teammember
+gg2 <- select(df2, act.category, all_time_hrs, team.vols) %>% 
+  filter(act.category != "Dog Program - TLAC") %>% unique() %>%
+  
+  ggplot(aes(x=team.hrs, y=team.vols)) + 
+  geom_point(aes(color=team.hrs/team.vols, size=team.hrs/team.vols)) + 
+  geom_text(
+    aes(y=team.vols+10, label=ActivityCategory, size=team.hrs/team.vols),
+    alpha=.7) + 
+  scale_x_continuous(breaks=(1:7)*2800) + scale_y_continuous(breaks=(1:10)*50) + theme.titles +
+  scale_alpha(range = c(.3,1)) + scale_color_gradient(low = "green", high = "blue")
+  
+# # GGPLOT 3 - team total hours
+gg3 <- select(df, ActivityCategory, team.vols, team.hrs) %>% unique() %>%
+  ggplot() +
+  geom_bar(aes(x=ActivityCategory, y=team.hrs, fill=team.vols), stat="identity") + 
+  coord_flip() + theme.titles + ylab("Total hrs per team")
+
+# # GGPLOT - number of vols on team
+gg4 <- select(df, ActivityCategory, team.vols, team.hrs) %>% unique() %>%
+  ggplot() + 
+  geom_bar(aes(x=ActivityCategory, y=team.vols, fill=team.hrs/team.vols), stat="identity") + 
+  coord_flip() + theme.titles + ylab("Volunteers")
+
+# # Not sure LOL
+# select(df, starts_with("vol"), Name, uuid) %>% unique() %>%
+#     filter(vol.range < 500) %>%
+#   mutate(hrs.cd = cume_dist(vol.hrs),
+#          hrs.nt = ntile(vol.hrs, 100),
+#          hrs10  = ntile(hrs.cd, 10),
+#          Name = ifelse(hrs.cd < 0.98, NA, Name)) %>%
+#   filter(df.v, hrs.nt > 95) %>%
+#   
+#   ggplot(aes(x=vol.range, y=hrs.cd, size=vol.hrs, label=Name, alpha=hrs.cd)) +
+#   geom_point(aes(color=hrs.nt)) + xlim(c(0,400)) + geom_text() + scale_size(range=c(3,6))
+```

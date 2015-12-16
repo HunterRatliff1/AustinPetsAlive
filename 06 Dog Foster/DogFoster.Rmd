@@ -1,0 +1,674 @@
+---
+title: "Glimpse Into Our Dog Fosters"
+author: "Hunter Ratliff"
+date: "December 13, 2015"
+output: 
+  html_document:
+    theme: united
+    toc: true
+---    
+
+<!-- Functions, Globals, ... --> 
+
+```{r global_options, include=FALSE}
+require(knitr)  # opts_knit$set(root.dir = "..")
+
+## Sets output for figures
+knitr::opts_chunk$set(fig.width=8, fig.height=8, fig.path='Figures/',
+                      warning=FALSE, message=FALSE, fig.align='center')
+
+# Required packages
+sapply(c("ggplot2", "dplyr", "lubridate", "reshape2", "magrittr", "stringi", "RColorBrewer", "devtools",
+         "knitr", "ggmap", "tidyr", "ggthemes", "scales", "RCurl", "gridExtra", "googlesheets", "xtable",
+         "emoGG"), require, character.only=TRUE)  
+
+# Citation functions
+source("~/Github/Citations/Citation Function.R")
+# source("~/Github/twitter/QuickWordclouds.R")
+rm(citation.date, citation.htr)
+
+
+
+### contributing source:
+# https://rstudio-pubs-static.s3.amazonaws.com/31867_8236987cf0a8444e962ccd2aec46d9c3.html
+```
+```{r Auth & Functions, eval=F, echo=F}
+## # Authorize with Google Drive
+## (my_sheets <- gs_ls())
+```
+
+```{r Load | Foster List}
+# Foster_list <- gs_title("FosterList") %>% 
+#   gs_read_csv() %>%
+#   select(PersonID, Name, Address) %>% 
+#   filter(!is.na(Address))
+```
+
+```{r Load | Foster LOS}
+# Foster_LOS <- gs_title("DogFosterLOS") %>% gs_read_csv() 
+```
+
+```{r Load | Adoptors}
+# Adoptors <- gs_title("AdoptorsYTD_2015-12-12") %>% gs_read_csv()
+```
+
+```{r Load | WebTraffic}
+
+Traffic <- gs_title("TrafficReport") %>% gs_read_csv() %>%
+  select(-Species, -PrimaryColour, -Outcome.Type)
+
+Traffic$Outcome <- mdy_hms(Traffic$Outcome) %>% floor_date(unit="day")
+Traffic$Intake  <- mdy_hms(Traffic$Intake) %>% floor_date(unit="day") 
+
+Traffic <- mutate(Traffic, LOS = as.period(Intake %--% Outcome, units="day"))
+Traffic$Days <- as.numeric(Traffic$LOS, unit="day")
+
+
+Traffic$Gender      <- as.factor(Traffic$Gender)
+Traffic$AgeGroup    <- as.factor(Traffic$AgeGroup)
+Traffic$Intake.Type <- as.factor(Traffic$Intake.Type)
+Traffic$Source      <- as.factor(Traffic$Source)
+
+Traffic %>%
+  filter(Source=="Web Service") %>%
+  ggplot(aes(x=Days, y=Views)) + 
+  geom_point(aes(shape=Gender, color=AgeGroup), alpha=0.75) +
+# qplot(data=Traffic, x=Days, y=Views, , alpha=I(0.75)) + 
+  scale_color_brewer(palette = "Paired") + theme_APA() +
+  guides(color=guide_legend(nrow=3,byrow=TRUE)) +
+  # scale_x_sqrt() + scale_y_sqrt() + 
+  facet_wrap("AgeGroup")
+
+glimpse(Traffic)
+```
+
+```{r ggTheme, echo=F}
+theme_APA <- function() {
+  theme(
+    text                 = element_text(family = "Georgia", color="#dd5928"),
+    title                = element_text(face = "bold"),
+    axis.text            = element_text(family = "Verdana", color="#4D4D4D"),
+    axis.line            = element_line(color="#4D4D4D"),
+    legend.box           = "horizontal",
+    legend.direction     = "horizontal",
+    panel.border         = element_rect(color="#A7C539", fill = NA),
+    panel.background     = element_rect(fill="white"),
+    panel.grid.major.x   = element_line(linetype = "dotted", color="#4d4d4d", size=0.50),
+    panel.grid.minor.x   = element_line(linetype = "dotted", color="#4d4d4d", size=0.15),
+    panel.grid.major.y   = element_line(linetype = "dashed", color="#3A7299", size=0.50),
+    # panel.grid.minor.y   = element_line(linetype = "dashed", color="#3A7299"),
+    strip.background     = element_rect(fill="#4d4d4d"),
+    strip.text           = element_text(family = "Verdana", face = "italic", color="#A7C539"),
+    plot.background      = element_rect(fill="#CFCFCF"),
+    plot.title           = element_text(size=18, hjust = 0),
+    
+    legend.position      = "bottom",
+    legend.background    = element_rect(fill="white", colour = "#3B7D00")
+  )
+}
+```
+
+```{r Load | Foster Details}
+## Get the detailed history of all fosters
+Foster_details <- gs_title("FosterPersonDetail") %>% gs_read_csv() %>%
+  # Remove some unnecessary columns
+  select(-Phone, -Email, -PersonMemoType, -PersonMemoSubType, 
+         -DateCreated, -CreatedBy, -PersonMemo, -PersonIDForGrouping,
+         -ARN, -Type) %>%
+  mutate(
+    # Handle other addresses
+    Address = gsub("Other+.+\n", "", Address),
+    Address = gsub("Mailing+.+\n", "", Address),
+    Address = gsub("Home Address: ", "", Address),
+    Address = gsub("\n", "", Address),
+    
+    # Remove space, if space between '#' and room 
+    Address = gsub(pattern = "# ", replacement = "#", Address),  
+    
+    # Handle appartment numbers
+    Address = gsub(pattern = "#\\S* ", replacement = "", Address),
+    Address = gsub(pattern = "\\(DNC\\)", replacement = "", Address)) %>%
+  
+  # Rename a few columns
+  rename(Current.Count=CurrentFosterCount, Start=Foster.Start.Date, 
+         End=Foster.End.Date, Reason=Foster.Reason, Weight=Current.Weight) %>%
+  
+  # Filter out entries with no species
+  filter(!is.na(Species))
+message("Loaded Foster Details")
+```
+
+```{r Factors and Date | Foster Details}
+## Make some factors 
+Foster_details$Person.ID <- as.factor(Foster_details$Person.ID)
+Foster_details$Reason    <- as.factor(Foster_details$Reason)
+Foster_details$Species   <- as.factor(Foster_details$Species)
+Foster_details$Altered   <- as.factor(Foster_details$Altered)
+
+# Format the dates
+Foster_details$Start  <- mdy_hms(Foster_details$Start) %>% floor_date(unit = "day")
+Foster_details$End    <- mdy_hms(Foster_details$End) %>% floor_date(unit = "day")
+Foster_details$Status <- ifelse(Foster_details$Textbox315=="Current Foster\nAnimal(s)", 
+                                "Current", "Former")
+Foster_details$Textbox315 <- NULL
+
+message("Formated Factors and Dates")
+```
+
+```{r Weights | Foster Details}
+## Converts animal's weight to grams
+Foster_details$Grams <- sapply(Foster_details$Weight, function(raw_weight){
+  
+  if(is.na(raw_weight)) return(NA)
+  split_weight <- unlist(stri_split_regex(raw_weight, " ", n = 2, simplify = F))
+  value <- split_weight[1]
+  unit  <- split_weight[2]
+  
+  if(unit=="pound") return(as.numeric(value)*453.592)
+  if(unit=="ounce") return(as.numeric(value)*28.3495)
+  if(unit=="kilogram") return(as.numeric(value)*1000)
+  if(unit=="gram") return(as.numeric(value)*1)
+  if(is.na(unit)) return(NA)
+})
+Foster_details$Weight <- NULL
+
+message("Converted Weights to grams")
+```
+
+```{r Ages | Foster Details}
+## Gets the animal's age in days
+Foster_details$Age.Days    <- as.integer(sapply(Foster_details$Current.Age, function(raw_age) {
+  # Return NA if nothing is given
+  if(is.na(raw_age)) return(NA)
+  
+  # Format the year portion (if exists)
+  y <- stri_extract(raw_age, regex = "\\d+y")
+  y <- as.numeric(gsub("y", "", y))
+  y <- ifelse(is.na(y), 0, y)
+  
+  # Format the month portion (if exists)
+  m <- stri_extract(raw_age, regex = "\\d+m")
+  m <- as.numeric(gsub("m", "", m))
+  m <- ifelse(is.na(m), 0, m)
+  
+  # Format the day portion (if exists)
+  d <- stri_extract(raw_age, regex = "\\d+d")
+  d <- as.numeric(gsub("d", "", d))
+  d <- ifelse(is.na(d), 0, d)
+  
+  # Save age as period (from lubridate package)
+  age_period <- years(y) + months(m) + days(d)
+  
+  # Return age in days
+  return(period_to_seconds(age_period)%/%(60*60*24))
+}))
+Foster_details$Age.Years   <- Foster_details$Age.Days / 365
+Foster_details$Current.Age <- NULL
+
+message("Parsed Ages")
+```
+
+```{r Reasons | Foster Details}
+## Creates a more general category for why the animal is in foster
+Foster_details$Reason.General <- as.factor(sapply(Foster_details$Reason, function(reason) {
+  Medical  <- c("Medical", "HW treatment", "Pregnant / Nursing", "Ringworm", "FeLV+", "Hospice")
+  Space    <- c("PASS assistance", "Outside of 5 county area", "Lack of Space")
+  Break    <- c("Cattery Break", "Break from Shelter")
+  Behavior <- c("Socialization", "Behavior", "Does not do well in cattery")
+  Age      <- c("Too Old", "Too Young")
+  Other    <- c("Special Needs", "Foster to Adopt")
+
+  if(reason %in% Medical) return("Medical")
+  if(reason %in% Space) return("Space")
+  if(reason %in% Break) return("Break")
+  if(reason %in% Behavior) return("Behavior")
+  if(reason %in% Age) return("Age")
+  if(reason %in% Other) return("Other")
+}))
+
+message("Simplified the reasons they were in foster")
+```
+
+
+
+```{r}
+Foster_details %>%
+  filter(Status!="Former") %>%
+  mutate(Name=paste(First, Last)) %>% 
+  select(Name, Person.ID, Species, Start, End, Age.Days, Reason.General) %>%
+  mutate(End=today())
+
+df <- Foster_details %>%
+  # filter(Status=="Former") %>%
+  mutate(Name=paste(First, Last)) %>% 
+  select(Name, Person.ID, Species, Start, End, Age.Days, Reason.General, Status) %>%
+  group_by(Person.ID, Species, Start) %>% 
+  mutate(
+    Litter_Size = n(),
+    End         = max(End)) %>% 
+  ungroup() %>% group_by(Person.ID, Species) %>% 
+  mutate(
+    AllTime=n(), 
+    Litters=n_distinct(Start)) %>% ungroup() %>%
+  arrange(desc(Litters)) %>% unique() %>%
+  mutate(
+    LOS = as.interval(Start %--% End),
+    LOS = day(as.period(LOS, unit = "days")))
+```
+
+
+
+```{r Plots | Foster Details}
+# Cortez
+glimpse(Foster_details)
+
+filter(df, Species=="Dog", Litters>2) %>% ggplot(aes(x=Name)) + 
+    geom_linerange(aes(ymin=Start, ymax=End, color=Reason.General), size=1, alpha=0.5) + 
+    geom_point(aes(y=Start, color=Reason.General), size=2, shape=1) + 
+    geom_point(aes(y=End, color=Reason.General), size=2, shape=4) + 
+    coord_flip() + theme_APA() + theme(panel.grid.major.y=element_line(color=NA)) + 
+  geom_rug(sides = "l", aes(linetype=Status))
+
+qplot(data=df, x=Litters, fill=Species)
+qplot(data=df, x=Reason.General, y=LOS, geom="boxplot",fill=Species)
+ 
+                              
+group_by(Foster_details, Person.ID, Species) %>% 
+  mutate(Count.AllTime=n(), Count.Litters = n_distinct(Start)) %>% ungroup() %>% View()
+  
+ggplot(Foster_details, aes(x=Person.ID)) + geom_linerange(aes(ymin=Start, ymax=End, color=Reason.General)) + coord_flip()
+
+gsub("/Mix", "", Foster_details$Breed) %>% stri_split(regex = "/") %>% unlist() %>% unique()
+
+ggplot(Foster_details, aes(x=Age.Years, fill=Species)) +
+  geom_histogram(aes(y=..density..), position = "dodge", color="black") +
+  geom_density(alpha=0.5, colour="black") +
+  scale_fill_brewer(palette = "Set2") + facet_wrap("Species") + theme_APA() +
+  labs(x="Age (Years)", y="Density", title="Animal's Age At End Of Foster Period")
+
+ggplot(Foster_details, aes(x=Age.Days/30, fill=Species)) +
+  geom_histogram(aes(y=..density..), position = "dodge", color="black") +
+  geom_density(alpha=0.5, colour="black") + xlim(c(0,48)) +
+  theme_APA() + scale_fill_brewer(palette = "Set2") + facet_wrap("Species") +
+  labs(x="Age (Months)", y="Density", title="Animal's Age At End Of Foster Period")
+
+
+# ## ggplot(Foster_details, aes(x=Age.Years, fill=Reason.General)) +
+# ##   geom_histogram(aes(y=..density..), color="black") +
+# ##   # geom_density(alpha=0.5, colour="black", position = "fill") +
+# ##   theme_economist() + facet_wrap("Species") +
+# ##   guides(fill=guide_legend(nrow=2,byrow=TRUE)) +
+# ##   scale_fill_brewer(name="Reason In\nFoster", palette = "Dark2") +
+# ##   labs(x="Age (Years)", y="Density", title="Animal's Age At End Of Foster Period")
+
+
+qplot(data=Foster_details, x=as.factor(Current.Count), fill=Species, position = "dodge") + 
+  scale_fill_brewer(palette = "Set2") + theme_APA() + theme(panel.grid.major.y=element_line(color=NA)) +
+  coord_flip() + labs(x="Animals Currently In Foster", y="Count of Foster Homes", 
+                      title="How Full Are Our Foster Homes?")
+
+qplot(data=Foster_details, x=Grams/453.592, fill=Species, geom = "density", alpha=I(0.5)) + 
+  xlim(c(0, 100)) + scale_fill_brewer(palette = "Set2") +
+  labs(x="Weight (lbs)", title="Foster Animal's Weight") + theme_APA() +
+  
+
+qplot(data=Foster_details, y=Age.Years, x=factor(Reason.General), 
+      fill=Species, geom = "boxplot", alpha=I(0.5)) +
+  labs(x="Reason in Foster", y="Age (years)", title="Reason in Foster By\nFoster Animal's Weight") + 
+  theme_APA() + scale_fill_brewer(palette = "Set2") + coord_flip() +
+  theme(panel.grid.major.y=element_line(color=NA))
+```
+
+```{r Foster Details prep-Geocode}
+## Save a list of unique addresses to look up
+ToLookup <- select(Foster_details, Person.ID, Address) %>% unique()
+# Add row numbers as a column
+ToLookup$Row.ID <- c(1:nrow(ToLookup))            
+
+
+## Process Zipcodes
+# Regular expression  for zipcode
+zip_regex <- "\\d\\d\\d\\d\\d$"
+
+# Grab the Zip code
+ToLookup$Zip <- regmatches(x = ToLookup$Address,  
+                           m = regexec(zip_regex, ToLookup$Address))
+
+# If no match found, replace with NA
+ToLookup$Zip <- sapply(ToLookup$Zip,              
+                       function(x) ifelse(length(x)==0, NA,
+                                          as.numeric(x)))
+
+# Remove zipcode and trim whitespace
+ToLookup$Address <- gsub(zip_regex, "",   
+                         ToLookup$Address) %>% trimws()
+
+
+## Process States
+# Regular expression for state
+state_regex <- "\\S+$"                            
+
+# Grab the State
+ToLookup$State <- regmatches(x = ToLookup$Address,
+                             m = regexec(state_regex, ToLookup$Address))  
+# If no match found, replace with NA
+ToLookup$State <- sapply(ToLookup$State,            
+                       function(x) ifelse(length(x)==0, NA,
+                                          as.character(x)))
+
+# Make factor
+ToLookup$State <- as.factor(ToLookup$State)
+
+# Remove state and trim whitespace
+ToLookup$Address <- gsub(state_regex, "",
+                         ToLookup$Address) %>% trimws()
+
+
+## Process City
+city_regex <- "[A-Z]{2,}\\s?[A-Z]+$"
+
+# Grab the City
+ToLookup$City <- regmatches(x = ToLookup$Address,  
+                            m = regexec(city_regex, ToLookup$Address))  
+
+# If no match found, replace with NA
+ToLookup$City <- sapply(ToLookup$City,
+                       function(x) ifelse(length(x)==0, NA,
+                                          as.character(x)))
+
+# Make factor
+ToLookup$City <- as.factor(ToLookup$City)         
+
+# Remove city and trim whitespace
+ToLookup$Address <- gsub(city_regex, "", ToLookup$Address) %>% trimws()
+
+###  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #  ###
+###                     Street Address cleanup                      ###
+###  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #  ###
+### This is a little crash course in regular expressions, so I tried
+### to document it as best as I could. R does regex a little weird,
+### so you might want to check out the guides I used:
+# >>   http://www.pcre.org/original/pcre.txt
+# >>   http://www.regular-expressions.info/rlanguage.html
+# >>   http://regexr.com/
+# 
+# For each opperation, I have a function adds a column called
+# Test, which represnets which entries are going to be affected
+# by the opperation. This is just FYI, and was to help me debug
+# the expressions as I figured it out
+
+## Moves the Address column to a new street column in case
+## we make any mistakes or want to compare to the original
+ToLookup$Street <- ToLookup$Address
+
+## Adds a notes column that make a note of special cases
+## we need to be mindful of while parsing the addresses
+ToLookup$Notes <- sapply(ToLookup$Address, function(x) {
+  if(grepl("fm", x, ignore.case = T)) return("FM")
+  if(grepl("Ranch Road", x, ignore.case = T)) return("Ranch Road")
+  if(grepl("Avenue", x, ignore.case = T)) return("Avenue")
+  if(grepl("Ave", x, ignore.case = T)) return("Ave")
+  if(grepl("Hwy", x, ignore.case = T)) return("Hwy")
+  if(grepl("HS", x, ignore.case = F)) return("HS")
+  if(grepl("IH", x, ignore.case = F)) return("IH")
+  if(grepl("Unit", x, ignore.case = T)) return("Unit")
+  return(NA)
+})
+ToLookup$Notes <- as.factor(ToLookup$Notes)
+
+
+## Make the 'ave' abbreviation of avenue the full name
+## Note: Notice that I included a whitespace in both the regex
+##       and replacement to prevent matching inside the words
+ToLookup$Mark   <- grepl("(Ave\\s)", ToLookup$Street)
+ToLookup$Street <- gsub("(Ave\\s)", "Avenue ", ToLookup$Street)
+
+## Match the capture group Avenue + space + zero or more digits.
+## Replace with Avenue + underscore. This will preserve Avenue A
+## as Avenue_A, while emilinating trailing numbers after addresses
+## like Main Avenue 304. In essence, we are converting the street 
+## names that are Avenue + (a letter) to a protectable name, to 
+## prepare for further parsing of trailing numbers/letters
+ToLookup$Mark   <- grepl("(Avenue\\s\\d*)|(avenue\\s\\d*)",
+                         ToLookup$Street)
+ToLookup$Street <- gsub("(Avenue\\s\\d*)|(avenue\\s\\d*)", 
+                        "Avenue_", ToLookup$Street)
+
+## Do a similar type of protection for FM (farmers market) roads
+ToLookup$Mark   <- grepl("(FM\\s)|(fm\\s)", ToLookup$Street)
+ToLookup$Street <- gsub("(FM\\s)|(fm\\s)", "FM_", ToLookup$Street)
+
+## And with these
+ToLookup$Street <- gsub("Ranch Road ", "Ranch_Road_", ToLookup$Street)
+ToLookup$Street <- gsub("Hwy ", "Hwy_", ToLookup$Street)
+ToLookup$Street <- gsub("HS ", "HS_", ToLookup$Street)
+ToLookup$Street <- gsub("IH ", "IH-", ToLookup$Street)
+
+
+## If the address has Unit + (letter/number), remove it. 
+## Note: The match must be Unit + (0-4 charachters) + end of line.
+##       This is to prevent any street name with Unit within it from
+##       being removed (ex: United)
+ToLookup$Mark   <- grepl("Unit.{0,4}$", ToLookup$Street)
+ToLookup$Street <- gsub("Unit.{0,4}$", "", ToLookup$Street) %>% trimws()
+
+# Remove any numbers at the end of the address that are preceded by a
+# whitespace. Most of these are apartment numbers that just throw off 
+# the geocoding API
+### Function to mark these as a T/F column 
+ToLookup$Mark   <- grepl(" \\d+$", ToLookup$Street)
+ToLookup$Street <- gsub(" \\d+$", "", ToLookup$Street) %>% trimws()
+
+# Remove all single alphabetic charachters at the end of the 
+# entry (ex: apartment A)
+ToLookup$Mark   <- grepl(" \\w$", ToLookup$Street)
+ToLookup$Street <- gsub(" \\w$", "", ToLookup$Street) %>% trimws()
+
+# Remove all digits at the end of the entry
+# Note: This is only digits preceded by a whitespace and doesn't
+# include mixed alpha-numeric or entries with an underscore
+ToLookup$Mark   <- grepl(" \\d+$", ToLookup$Street)
+ToLookup$Street <- gsub(" \\d+$", "", ToLookup$Street) %>% trimws()
+
+# Handle the remaining odd balls (C313, W102, 332maria, etc)
+ToLookup$Mark   <- grepl("( [A-Z]\\d+$)|(332maria)", ToLookup$Street)
+ToLookup$Street <- gsub("( [A-Z]\\d+$)|(332maria)", "", ToLookup$Street)
+
+# Replace underscores with spaces (not blanks)
+# This 'unhides' the groups we protected before
+ToLookup$Mark   <- grepl("_", ToLookup$Street)
+ToLookup$Street <- gsub("_", " ", ToLookup$Street)
+
+# Random bit, but noticed this while scrolling
+ToLookup$Street <- gsub("Doc Holliday Tri",
+                        "Doc Holliday Trail", ToLookup$Street)
+
+# Make all empty strings NA
+ToLookup[ToLookup==""] <- NA
+
+# Reorder and clean up the data frame
+ToLookup <- select(ToLookup, 
+                   Row.ID, Person.ID, Zip, State, City, Street)
+
+# Make query paramater
+ToLookup$Q <- paste(ToLookup$Street, ToLookup$City, 
+                    ToLookup$State, ToLookup$Zip)
+
+# Save as a file
+root_path <- "/Users/main/Github/Austin Pets Alive/06 Dog Foster"
+
+if(getwd()!=root_path) setwd(as.character(root_path))
+saveRDS(ToLookup, "data/ToLookup.rds")
+rm(zip_regex, state_regex, city_regex, root_path)
+```
+
+```{r Foster Details prep-Geocode}
+## List of all entries without NA's
+ToLookup.List <- filter(ToLookup, 
+       !is.na(Street), !is.na(City), 
+       !is.na(State), !is.na(Zip))$Q
+
+## Geocode Addresses
+# ToLookup.geo1  <- geocode(ToLookup.List[001:100], source = "google")
+# write.csv(ToLookup.geo1, "/Users/main/Github/Austin Pets Alive/06 Dog Foster/data/geo1.csv")
+
+# ToLookup.geo2  <- geocode(ToLookup.List[101:200], source = "google")
+# write.csv(ToLookup.geo2, "/Users/main/Github/Austin Pets Alive/06 Dog Foster/data/geo2.csv")
+
+# ToLookup.geo3  <- geocode(ToLookup.List[201:300], source = "google")
+# write.csv(ToLookup.geo3, "/Users/main/Github/Austin Pets Alive/06 Dog Foster/data/geo3.csv")
+
+# ToLookup.geo4  <- geocode(ToLookup.List[301:400], source = "google")
+# write.csv(ToLookup.geo4, "/Users/main/Github/Austin Pets Alive/06 Dog Foster/data/geo4.csv")
+
+# ToLookup.geo5  <- geocode(ToLookup.List[401:500], source = "google")
+# write.csv(ToLookup.geo5, "/Users/main/Github/Austin Pets Alive/06 Dog Foster/data/geo5.csv")
+
+# ToLookup.geo6  <- geocode(ToLookup.List[501:600], source = "google")
+# write.csv(ToLookup.geo6, "/Users/main/Github/Austin Pets Alive/06 Dog Foster/data/geo6.csv")
+
+# ToLookup.geo7  <- geocode(ToLookup.List[601:700], source = "google")
+# write.csv(ToLookup.geo7, "/Users/main/Github/Austin Pets Alive/06 Dog Foster/data/geo7.csv")
+
+# ToLookup.geo8  <- geocode(ToLookup.List[701:800], source = "google")
+# write.csv(ToLookup.geo8, "/Users/main/Github/Austin Pets Alive/06 Dog Foster/data/geo8.csv")
+
+# ToLookup.geo9  <- geocode(ToLookup.List[801:900], source = "google")
+# write.csv(ToLookup.geo9, "/Users/main/Github/Austin Pets Alive/06 Dog Foster/data/geo9.csv")
+
+# ToLookup.geo10 <- geocode(ToLookup.List[901:1000], source = "google")
+# write.csv(ToLookup.geo10, "/Users/main/Github/Austin Pets Alive/06 Dog Foster/data/geo10.csv")
+
+# ToLookup.geo11 <- geocode(ToLookup.List[1001:1100], source = "google")
+# write.csv(ToLookup.geo11, "/Users/main/Github/Austin Pets Alive/06 Dog Foster/data/geo11.csv")
+
+# ToLookup.geo12 <- geocode(ToLookup.List[1101:1200], source = "google")
+# write.csv(ToLookup.geo12, "/Users/main/Github/Austin Pets Alive/06 Dog Foster/data/geo12.csv")
+# 
+# ToLookup.geo13 <- geocode(ToLookup.List[1201:1240], source = "google")
+# write.csv(ToLookup.geo13, "/Users/main/Github/Austin Pets Alive/06 Dog Foster/data/geo13.csv")
+
+ToLookup.geo <- bind_rows(ToLookup.geo1, ToLookup.geo2, ToLookup.geo3, ToLookup.geo4, ToLookup.geo5,
+          ToLookup.geo6, ToLookup.geo7, ToLookup.geo8, ToLookup.geo9, ToLookup.geo10,
+          ToLookup.geo11, ToLookup.geo12, ToLookup.geo13)
+
+ToLookup.geo$search <- ToLookup.List
+
+ToLookup.geo$Person.ID <- filter(ToLookup, 
+       !is.na(Street), !is.na(City), 
+       !is.na(State), !is.na(Zip))$Person.ID
+
+rm(ToLookup.geo1, ToLookup.geo2, ToLookup.geo3, ToLookup.geo4, ToLookup.geo5,
+          ToLookup.geo6, ToLookup.geo7, ToLookup.geo8, ToLookup.geo9, ToLookup.geo10,
+          ToLookup.geo11, ToLookup.geo12, ToLookup.geo13)
+
+geo_frame <- merge(ToLookup, ToLookup.geo) %>% select(-Q, -search) 
+
+write.csv(geo_frame, "/Users/main/Github/Austin Pets Alive/06 Dog Foster/data/geo.csv")
+# saveRDS(geo_frame, "data/geo_frame.rds")
+# saveRDS(ToLookup, "data/ToLookup.rds")
+# saveRDS(ToLookup.geo, "data/ToLookup_geo.rds")
+```
+
+```{r Foster Maps}
+map_ATX <- qmap("Austin", zoom=11, maptype = "toner-lite", source = "stamen")
+
+t <- group_by(Foster_details, Person.ID, Species, lon, lat) %>% 
+  summarise(Fosters = n()) %>% ungroup()
+cats30 <- filter(t, Species=="Cat", Fosters>=30)
+cats20 <- filter(t, Species=="Cat", Fosters>=20, Fosters<30)
+cats10 <- filter(t, Species=="Cat", Fosters>=10, Fosters<20)
+cats   <- filter(t, Species=="Cat", Fosters<10)
+dogs10 <- filter(t, Species=="Dog", Fosters>=10)
+dogs05 <- filter(t, Species=="Dog", Fosters>=5,  Fosters<10)
+dogs02 <- filter(t, Species=="Dog", Fosters>=2,  Fosters<5)
+dogs   <- filter(t, Species=="Dog", Fosters<2)
+rm(t)  
+```
+
+```{r DogFoster_Emoji}
+## Dogs
+# Dogs - Emoji
+map_ATX + 
+  stat_density2d(data=filter(t, Species=="Dog"), aes(x=lon, y=lat, fill=..level..), geom="polygon", alpha=0.25) +
+  geom_jitter(data=dogs, aes(x=lon, y=lat, size=Fosters*0.002)) +
+  geom_emoji(data=dogs02, aes(x=lon, y=lat), emoji="1f429", size=0.03) + 
+  geom_emoji(data=dogs05, aes(x=lon, y=lat), emoji="1f436", size=0.05) +
+  geom_emoji(data=dogs10, aes(x=lon, y=lat), emoji="1f436", size=0.08) + 
+  theme_map() + theme(plot.title	= element_text(colour = "#dd5928", family="Georgia", face="bold", size=24)) +
+  scale_fill_gradient(low="blue", high="green") + scale_size(name="Number of Dogs") +
+  guides(size=F, fill=F) + labs(title="Dog Fosters - Emoji")
+citation.apa("@HunterRatliff1")
+```
+
+```{r DogFoster_Plain}
+# Dogs - Regular
+map_ATX + 
+  stat_density2d(data=filter(t, Species=="Dog"), aes(x=lon, y=lat, fill=..level..), geom="polygon", alpha=0.25) +
+  geom_jitter(data=filter(t, Species=="Dog"), aes(x=lon, y=lat, size=Fosters)) +
+  theme_map() + theme(plot.title	= element_text(colour = "#dd5928", family="Georgia", face="bold", size=24)) +
+  scale_fill_gradient(low="blue", high="green") + scale_size(name="Number of Dogs") +
+  guides(fill=F) + labs(title="Dog Fosters")
+citation.apa("@HunterRatliff1")
+```
+
+```{r CatFoster_Emoji}
+## Cats
+# Cats - Emoji
+map_ATX + 
+  stat_density2d(data=filter(t, Species=="Cat"), aes(x=lon, y=lat, fill=..level..), geom="polygon", alpha=0.25) +
+  geom_jitter(data=cats, aes(x=lon, y=lat, size=Fosters*0.002)) +
+  geom_emoji(data=cats10, aes(x=lon, y=lat), emoji="1f42f", size=0.03) + 
+  geom_emoji(data=cats20, aes(x=lon, y=lat), emoji="1f431", size=0.05) +
+  geom_emoji(data=cats30, aes(x=lon, y=lat), emoji="1f431", size=0.08) + 
+  theme_map() + theme(plot.title	= element_text(colour = "#dd5928", family="Georgia", face="bold", size=24)) +
+  scale_fill_gradient(low="blue", high="green") + 
+  guides(size=F, fill=F) + labs(title="Cat Fosters - Emoji")
+citation.apa("@HunterRatliff1")
+```
+
+```{r CatFoster_Plain}
+# Cats - Regular
+map_ATX + 
+  stat_density2d(data=filter(t, Species=="Cat"), aes(x=lon, y=lat, fill=..level..), geom="polygon", alpha=0.25) +
+  geom_jitter(data=filter(t, Species=="Cat"), aes(x=lon, y=lat, size=Fosters)) +
+  theme_map() + theme(plot.title	= element_text(colour = "#dd5928", family="Georgia", face="bold", size=24)) +
+  scale_fill_gradient(low="blue", high="green") + scale_size(name="Number of Cats") + 
+  guides(fill=F) + labs(title="Cat Fosters")
+citation.apa("@HunterRatliff1")
+```
+
+```{r End: Foster Maps}
+rm(dogs02, dogs05, dogs10, dogs, cats, cats10, cats20, cats30)
+```
+
+
+<br><br><br>
+<hr>
+# Contact
+<hr>
+**Hunter Ratliff**
+
+Email: hunterratliff1@gmail.com   
+Twitter: @[HunterRatliff1](https://twitter.com/HunterRatliff1)   
+
+```
+Copyright (C) 2015 Hunter Ratliff
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+```
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.

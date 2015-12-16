@@ -1,0 +1,194 @@
+---
+title: "Geo-plots"
+author: "Hunter Ratliff"
+date: "September 10, 2015"
+output: html_document
+---
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+# # NOT RUN
+# imported.safe_merge <- read.csv("~/Google Drive/*Scripts/DataVis/APA_vol_hours/safe_merge-CSV.csv")
+# imported.Hours <- read.csv("~/Google Drive/*Scripts/DataVis/APA_vol_hours/hours-CSV.csv")
+# imported.Users <- read.csv("~/Google Drive/*Scripts/DataVis/APA_vol_hours/users-CSV.csv")
+# imported.geo   <- read.csv("~/Google Drive/*Scripts/DataVis/APA_vol_hours/LatLong.csv")
+
+
+
+
+# > names(safe_merge)
+#  [1] "act.date"         "act.hrs"          "uuid"             "act.category.id"  "act.id"          
+#  [6] "vol.name"         "act.category"     "vol.city"         "vol.zip"          "vol.state"       
+# [11] "vol.role"         "vol.status"       "vol.dog.training" "vol.address"      "vol.login.d"     
+# [16] "vol.orint.d"      "vol.age"          "age_group"        "has_geo"          "address"         
+# [21] "lon"              "lat"              "act.w"            "act.m"            "act.y"           
+
+
+```
+
+
+
+```{r geoGraph, eval=F}
+require(dplyr)
+require(magrittr)
+require(lubridate)
+require(ggplot2)
+require(ggmap)
+df <- safe_merge %>% filter(!is.na(vol.status)) %>% group_by(uuid, act.category) %>% summarise(all_time_hrs = sum(act.hrs))
+
+df <- left_join(Users, df) %>% 
+  filter(has_geo == TRUE) %>% unique() %>%
+  select(-address, -vol.address, -vol.state, -vol.city, -vol.zip, -has_geo) %>% 
+  unique() %>% mutate(
+#     rank    = rank(vol.hrs.all_time),
+#     TenTile     = ntile(vol.hrs.all_time, 10),
+#     densityRank = dense_rank(vol.hrs.all_time),
+    cat = grepl("Cat", act.category),
+    dog = grepl("Dog", act.category),
+    act.metaCat = ifelse(cat==T | dog ==T, ifelse(cat==T,"cat","dog"), "other")) %>% 
+  select(-cat, -dog)
+
+
+# BUILD BASE MAP
+require('ggmap')                    # define map object
+require('RColorBrewer')
+map.in <- get_map(location = "austin", zoom = 12, maptype="toner")
+theme_set(theme_bw(base_size = 8))
+
+## NOT RUN
+## > names(df)
+##  [1] "uuid"             "vol.role"         "vol.status"       "vol.dog.training" "vol.name"        
+##  [6] "vol.login.d"      "vol.orint.d"      "vol.age"          "age_group"        "lon"             
+## [11] "lat"              "act.category"     "all_time_hrs"     "act.metaCat" 
+
+
+
+df2 <- df %>% mutate(rank.all    = rank(all_time_hrs),
+                     perRank.all = percent_rank(all_time_hrs),
+                     cumRank.all = cume_dist(all_time_hrs),
+                     tenTile.all = ntile(all_time_hrs, 10)) %>% unique()
+df.vol <- group_by(df, vol.name) %>% 
+  mutate(NumberOfTeams = n(),
+         all_time_hrs       = sum(all_time_hrs)) %>% 
+  ungroup() %>% select(-act.category) %>% unique() %>%
+  mutate(rank.vol    = rank(all_time_hrs),
+         perRank.vol = percent_rank(all_time_hrs),
+         cumRank.vol = cume_dist(all_time_hrs),
+         tenTile.vol = ntile(all_time_hrs, 10)) %>% unique()
+
+
+
+
+####################
+#   MAIN GEO MAP   #
+####################
+mainGeo <- ggmap(map.in) + geom_density2d(data=df2,
+                                      aes(x=lon, y=lat), size=0.3) + 
+  stat_density2d(data=df2, size=0.1, bins=7, geom="polygon",
+    aes(x=lon, y=lat, fill=..level.., alpha=..level..)) +
+  scale_fill_gradient(name="Number of hrs", space="Lab",
+                       high="green") + 
+  scale_alpha(range=c(.1, 0.5), guide=FALSE) + theme.map +
+  labs(x="Longitude", y="Latitude") + ggtitle("Volunteer Base") + coord_map()
+
+print(mainGeo + facet_wrap("vol.status"))
+print(mainGeo + facet_wrap("act.metaCat"))
+print(mainGeo + facet_wrap("age_group"))
+print(mainGeo + facet_wrap("act.category"))
+print(mainGeo + facet_wrap("vol.dog.training"))
+
+ggsave(filename = "mainGeo.png",
+       plot = mainGeo,
+       scale = 1,
+       width = 10, height = 10,
+       dpi = 300)
+
+############
+#  MAP 01  #
+############
+average_number_hours <- ggmap(map.in) %+% df2 + aes(x=lon, y=lat,    z = all_time_hrs) + 
+  stat_summary2d(fun = mean, alpha=0.6) +    # Adjust size w/ `binwidth = c(.02, .02)`
+  
+  scale_fill_gradient(name="Total Hrs (avg)", space="Lab",
+                      low="#4D4D4D", high="#819E15") + 
+                      # low="white", high="black") + 
+  labs(x="Longitude", y="Latitude") + ggtitle("Average Number of hours") + coord_map() +
+  theme.map
+
+print(average_number_hours)
+
+ggsave(filename = "M01_AvgVolHours_by_Area.png",
+       plot = average_number_hours,
+       scale = 1,
+       width = 10, height = 10,
+       dpi = 300)
+
+############
+#  MAP 02  #
+############
+map.cumrank.all <- ggmap(map.in) %+% df2 + aes(x=lon, y=lat, z=cumRank.all) + 
+  stat_summary2d(fun = mean, alpha=0.6, binwidth = c(.004, .004)) +
+  scale_fill_gradient(name="Mean of rank", space="Lab", low="red", high="green") + 
+  labs(x="Longitude", y="Latitude") + theme.map +     # low="#4D4D4D", high="#819E15") + 
+  coord_map() + ggtitle("Volunteers ranked by all time hours") 
+
+print(map.cumrank.all)
+print(map.cumrank.all + facet_wrap("act.metaCat", nrow=1))
+print(map.cumrank.all + facet_wrap("act.category", nrow=4))
+print(map.cumrank.all + facet_grid(vol.role ~ vol.status))
+
+
+#################
+#  Dog Walkers  #
+#################
+dogWalkers.rank <- ggmap(map.in) %+% filter(df2, act.category=="Dog Program - TLAC") + 
+  aes(x=lon, y=lat, z=cumRank.all) + 
+  stat_summary2d(fun = mean, alpha=0.6, binwidth = c(.004, .004)) +
+  scale_fill_gradient(name="Mean of rank", space="Lab", low="red", high="green") + 
+  labs(x="Longitude", y="Latitude") + theme.map +     # low="#4D4D4D", high="#819E15") + 
+  coord_map() + ggtitle("Dog Walkers") 
+ggsave(filename = "DogWalkers_rank.png",
+       plot = dogWalkers.rank,
+       scale = 1,
+       width = 10, height = 10,
+       dpi = 300)
+
+#######################
+#  Behind the Scenes  #
+#######################         
+bts.rank <- ggmap(map.in) %+% filter(df2, act.category=="Behind the Scenes") + 
+  aes(x=lon, y=lat, z=cumRank.all) + 
+  stat_summary2d(fun = mean, alpha=0.6, binwidth = c(.004, .004)) +
+  scale_fill_gradient(name="Mean of rank", space="Lab", low="red", high="green") + 
+  labs(x="Longitude", y="Latitude") + theme.map +     # low="#4D4D4D", high="#819E15") + 
+  coord_map() + ggtitle("Behind the Scenes")
+ggsave(filename = "BTS_rank.png",
+       plot = bts.rank,
+       scale = 1,
+       width = 10, height = 10,
+       dpi = 300)
+
+#################
+#  CSR HOURS    #
+#################
+CSR <- ggmap(map.in) + geom_density2d(data=filter(df2, act.category=="Community Service Restitution"),
+                                      aes(x=lon, y=lat), size=0.1) + 
+  stat_density2d(data=df2, size=0.1, bins=10, geom="polygon",
+    aes(x=lon, y=lat, fill=..level.., alpha=..level..)) +
+  scale_fill_gradient(name="Number of hrs", space="Lab",
+                      low="red", high="green") + 
+  scale_alpha(range=c(.1, 0.5), guide=FALSE) + theme.map +
+  labs(x="Longitude", y="Latitude") + ggtitle("CSR hours") + coord_map()
+ggsave(filename = "CSR_hours.png",
+       plot = CSR,
+       scale = 1,
+       width = 10, height = 10,
+       dpi = 300)
+
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

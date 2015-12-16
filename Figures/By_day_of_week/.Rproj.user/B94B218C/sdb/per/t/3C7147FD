@@ -1,0 +1,18 @@
+{
+    "contents" : "OnStartUp = function ()\n{\n  # Load packages\n  packs = c(\"magrittr\", \"dplyr\", \"ggplot2\", \"lubridate\", \"ggplot2\", \"ggthemes\", \"reshape2\", \"gridExtra\")\n  sapply(packs, require, character.only=TRUE)   # Load the packages.\n}\nOnStartUp()\n\ncitation = function ()\n{\n  require(grid)\n  require(gridExtra)\n  grid.text(\"Hunter Ratliff | 2015\",\n                     x = unit(0.97, \"npc\"), y = unit(0.03, \"npc\"), just = c(\"right\", \"bottom\"), \n                     gp = gpar(fontface = \"bold\", fontsize = 14, col = \"grey\"))\n}\nG1    # This is any completed ggplot\ncitation()\n\n             \n# Create the textGrobs\n# Text1 = textGrob(\"Hunter Ratliff | 2015\")\n# Text2 = textGrob(paste(\"Mean = \", mean(df$x), sep = \"\"))\n# \n# G1 + annotation_custom(grid.text(\"Hunter Ratliff | 2015\"),  xmin = 4, xmax = 4, ymin = -50, ymax = -5)\n#   annotation_custom(grob = Text2,  xmin = 8, xmax = 8, ymin = -3, ymax = -3)\n# p1\n# \n# # Code to override clipping\n# gt <- ggplot_gtable(ggplot_build(p1))\n# gt$layout$clip[gt$layout$name==\"panel\"] <- \"off\"\n# grid.draw(gt)",
+    "created" : 1444181804686.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "1|1|5|0|\n9|1|15|0|\n",
+    "hash" : "3788454942",
+    "id" : "3C7147FD",
+    "lastKnownWriteTime" : 1444182831,
+    "path" : "~/Google Drive/100 - Publicly hosted/text_analysis/ALL_SCRIPTS_EVER/Add_citation.R",
+    "project_path" : null,
+    "properties" : {
+        "tempName" : "Untitled1"
+    },
+    "relative_order" : 4,
+    "source_on_save" : false,
+    "type" : "r_source"
+}
