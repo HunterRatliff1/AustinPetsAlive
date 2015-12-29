@@ -1,0 +1,547 @@
+---
+title: "Volunteer Hours in 2015"
+author: "Hunter Ratliff"
+date: "December 29, 2015"
+output: 
+  html_document:
+    theme: united
+    toc: true
+    css: styles.css
+---
+
+```{r global_options, include=FALSE}
+require(knitr)
+## Define global settings for chunk output
+knitr::opts_chunk$set(fig.width=7, fig.height=7, fig.align='center',      
+                      fig.path='Hours_2015/',                          # Sets output for figures
+                      echo=FALSE, warning=FALSE, message=FALSE)        # Silences most chunk outputs
+
+## Load required packages
+# Make a vector of the names of packages we plan to use
+packs <- c("magrittr", "dplyr", "reshape2", "ggplot2", "lubridate", "RColorBrewer",
+           "stringr", "ggthemes", "scales", "gridExtra", "googlesheets", "plotly")
+
+# Apply the require fxn to each package in list
+sapply(packs, require, character.only=TRUE)
+rm(packs)
+
+## The 'source' function runs the R script of the provided path 
+# See code:         https://github.com/HunterRatliff1/Citations
+source("~/Github/Citations/Citation Function.R")
+rm(citation.htr, citation.date)
+
+## Theme object for ggplots
+source("~/Github/utexas/diveristy/theme_UT.R")
+
+xMatch <- function(p, x)    grepl(pattern=p,               x=x, ignore.case = T)
+```
+```{r Read | Hours}
+Hours <- readRDS("~/Github/Austin Pets Alive/07 End of Year 2015/Data/Hours.RDS")$value
+# Hours <- source("~/Github/Austin Pets Alive/07 End of Year 2015/R/Hours.R")
+# # As factors
+# Hours$Location <- as.factor(Hours$Location)
+# Hours$Animal   <- as.factor(Hours$Animal) 
+# Hours$Type     <- as.factor(Hours$Type)
+# Hours$SubType  <- as.factor(Hours$SubType)
+# 
+# saveRDS(object = Hours, file = "~/Github/Austin Pets Alive/07 End of Year 2015/Data/Hours.RDS")
+```
+
+# TL;DR
+
+* Among all volunteers, we had <b>`r sum(Hours$Duration) %>% round() %>% comma()` 
+volunteer hours</b> logged from `r min(Hours$Date.Vol) %>% format("%b %d %Y")` to 
+`r max(Hours$Date.Vol) %>% format("%b %d %Y")`
+* We invested <b>`r sum(Hours$Duration[Hours$isTraining]) %>% round() %>% comma()` 
+hours training</b> volunteers
+* <b>`r nrow(count(Hours, User.ID)) %>% comma()` unique volunteers</b> logged a total of
+<b>`r nrow(Hours) %>% comma()` entries</b>, with an average duration of 
+<b>`r mean(Hours$Duration) %>% round(2)` hours per entry</b>
+
+The following figure summarises the total `hours` logged by the color, and labels 
+the `number of volunteers` who logged hours (in the white text box)
+
+```{r}
+Hours %>%
+  group_by(Type, Animal) %>%
+  summarise(
+    Count = n(),
+    Hours = sum(Duration),
+    nVol  = n_distinct(User.ID)) %>%
+ggplot(aes(x=Animal, y=Type, label=round(nVol))) + 
+  geom_tile(aes(fill=Hours)) + 
+  geom_label() + 
+  scale_fill_continuous_tableau(labels=comma) +
+  theme_UT() + theme(legend.position="right", legend.direction="vertical") +
+  labs(x="Animal Type", y="Activity Type")
+# dcast(Hours, Animal~Type)
+```
+
+
+
+# 1. Percentage of Total Hours
+
+## 1.1 By Activity Type
+
+```{r Fig01-A, fig.width=6, fig.height=8.1}
+Hours %>%
+  group_by(Type) %>% summarise(sum.Hours = sum(Duration)) %>%
+  # ungroup() %>% mutate(per.Hours = sum.Hours/sum(sum.Hours)) %>%
+  ggplot(aes(x=factor(""), y=sum.Hours, fill=Type)) + 
+  geom_bar(stat="identity", position = "stack", color="black") + 
+  geom_bar(stat="identity", position = "stack", color="black") + 
+  
+  scale_fill_brewer(palette = "Set1") +
+  guides(fill=guide_legend(nrow=3,byrow=TRUE)) +
+  coord_polar(theta = "y") + 
+  theme_UT() + labs(x="", y="", title="Percentage of Total Hours, By Activity Type")
+```
+
+## 1.2 Animal Type
+
+```{r Fig01-B, fig.width=6, fig.height=7}
+Hours %>%
+  group_by(Animal) %>% summarise(sum.Hours = sum(Duration)) %>%
+  # ungroup() %>% mutate(per.Hours = sum.Hours/sum(sum.Hours)) %>%
+  ggplot(aes(x=factor(""), y=sum.Hours, fill=Animal)) + 
+  geom_bar(stat="identity", position = "stack", color="black") + 
+  geom_bar(stat="identity", position = "stack", color="black") + 
+  
+  scale_fill_brewer(palette = "Dark2") +
+  guides(fill=guide_legend(nrow=2,byrow=TRUE)) +
+  coord_polar(theta = "y") + 
+  theme_UT() + labs(x="", y="", title="Percentage of Total Hours, By Animal Type")
+```
+
+## 1.3 Location Volunteered
+
+```{r Fig01-C, fig.width=6, fig.height=7}
+Hours %>%
+  group_by(Location) %>% summarise(sum.Hours = sum(Duration)) %>%
+  # ungroup() %>% mutate(per.Hours = sum.Hours/sum(sum.Hours)) %>%
+  ggplot(aes(x=factor(""), y=sum.Hours, fill=Location)) + 
+  geom_bar(stat="identity", position = "stack", color="black") + 
+  geom_bar(stat="identity", position = "stack", color="black") + 
+  
+  scale_fill_brewer(palette = "Paired") +
+  guides(fill=guide_legend(nrow=2,byrow=TRUE)) +
+  coord_polar(theta = "y") + 
+  theme_UT() + labs(x="", y="", title="Percentage of Total Hours, By Location")
+```
+
+
+
+
+
+# 2. Activity Type Total Hours
+
+## 2.1 By Animal Type
+
+```{r Fig02-A, fig.width=6, fig.height=7}
+Hours %>%
+  select(-SubType, -Activity, -isTraining) %>%
+  group_by(Type, Animal) %>%
+  summarise(
+    nEntries   = n(),
+    nVols     = n_distinct(User.ID),
+    sum.Hours = sum(Duration),
+    avg.Hours = round(mean(Duration), 2),
+    med.Hours = round(median(Duration), 2),
+    sd.Hours  = round(sd(Duration), 2),
+    HrPerVol  = round(sum.Hours/nVols, 2)) %>%
+  ggplot(aes(x=Type, y=HrPerVol, fill=Animal, alpha=sum.Hours/1000)) + 
+  geom_bar(width = 1, stat="identity", color="black") + 
+  scale_alpha_continuous(name="Total Hours For Activity\n(x1000)", range=c(0.5, 1)) +
+  theme_UT() + coord_polar() + 
+  labs(x="", y="Average Hours Per Volunteer", title="Activity Type Hours, By Animal Type")
+```
+
+## 2.2 By Month
+
+```{r Fig02-B, fig.width=6, fig.height=7}
+Hours %>%
+  select(-SubType, -Activity, -isTraining) %>%
+  group_by(Type, Month=month(Date.Vol, label=T)) %>%
+  summarise(
+    nEntries   = n(),
+    nVols     = n_distinct(User.ID),
+    sum.Hours = sum(Duration),
+    avg.Hours = round(mean(Duration), 2),
+    med.Hours = round(median(Duration), 2),
+    sd.Hours  = round(sd(Duration), 2),
+    HrPerVol  = round(sum.Hours/nVols, 2)) %>%
+  
+  ggplot(aes(x=Month, y=sum.Hours/1000, fill=Type)) + 
+  geom_bar(width = 1, stat="identity", color="black") + 
+  # scale_alpha_continuous(name="Hours Per Volunteer", range=c(0.4, 1)) +
+  scale_fill_brewer(palette = "Set1") +
+  guides(fill=guide_legend(nrow=3,byrow=TRUE)) +
+  theme_UT() + coord_polar() + 
+  labs(x="", y="Total Hours (x1000)", title="Activity Type Hours, By Month")
+```
+
+
+
+
+
+# 3. Total Hours vs Number of Volunteers
+
+## 3.1 By Activity Type
+
+```{r Hours Fig02, include=F}
+Hours %>%
+  group_by(Type) %>% 
+  summarise(
+    nEntries  = n(),
+    nVols     = n_distinct(User.ID),
+    sum.Hours = sum(Duration),
+    avg.Hours = round(mean(Duration), 2),
+    med.Hours = round(median(Duration), 2),
+    sd.Hours  = round(sd(Duration), 2),
+    HrPerVol  = round(sum.Hours/nVols, 2)) %>% 
+  
+  ggplot(aes(x=nVols, y=sum.Hours, color=Type, size=HrPerVol)) + 
+  geom_point() +
+  scale_size(name="Hours Per Volunteer") +
+  scale_color_brewer(palette = "Set1") + guides(color=guide_legend(nrow=3,byrow=TRUE)) +
+  theme_UT() + labs(x="Number of Volunteers", y="Total Hours",
+                    title="Total Hours vs Number of Volunteers, By Type")
+```
+```{r}
+plotly::ggplotly()
+```
+
+
+
+
+# 4. Totals Over Time
+
+## 4.1 Hours, By Activity Type
+
+```{r Hours Fig03-A, include=F}
+Hours %>%
+  # Transform
+  group_by(Type, Week=floor_date(Date.Vol, unit="week")) %>% 
+  summarise(
+    nEntries  = n(),
+    nVols     = n_distinct(User.ID),
+    sum.Week = sum(Duration)) %>% 
+  group_by(Type) %>%
+  
+  # Plot
+  ggplot(aes(x=Week, y=sum.Week, color=Type, fill=Type)) + 
+  geom_bar(stat="identity", color="black") +
+    ## scales
+  scale_fill_brewer(palette = "Set1") + guides(fill=guide_legend(nrow=3,byrow=TRUE)) +
+    ## theme
+  theme_UT() + labs(x="Time", y="Weekly Hours",
+                    title="Total Hours Over Time, By Activity Type")
+```
+```{r}
+plotly::ggplotly()
+```
+
+## 4.2 By Activity Type (Details)
+
+```{r Hours Fig03-B, fig.width=6, fig.height=6}
+ggplot2::last_plot() + 
+  facet_wrap("Type", scales = "free_y") + 
+  labs(title="Total Hours Over Time, By Type (Details)")
+```
+
+## 4.3 Number of Volunteers, By Activity Type
+
+```{r Hours Fig03-C, include=FALSE}
+Hours %>%
+  # Transform
+  group_by(Type, Week=floor_date(Date.Vol, unit="week")) %>% 
+  summarise(
+    nEntries  = n(),
+    nVols     = n_distinct(User.ID),
+    sum.Week = sum(Duration)) %>% 
+  group_by(Type) %>%
+  
+  # Plot
+  ggplot(aes(x=Week, y=nVols, color=Type, fill=Type, alpha=round(nEntries/nVols))) + 
+  geom_bar(stat="identity", color="black") +
+    ## scales
+  scale_alpha(name="Entries Per Volunteer") + 
+  scale_fill_brewer(palette = "Set1") + guides(fill=guide_legend(nrow=3,byrow=TRUE)) +
+    ## theme
+  theme_UT() + labs(x="Time", y="Number of Unique Volunteers",
+                    title="Number of Volunteers Over Time, By Type")
+
+citation.apa("Figure 03[C]")
+```
+```{r}
+plotly::ggplotly()
+```
+
+
+
+
+
+# Figure 04 - Bar Chart
+```{r Hours Fig04}
+Hours %>%
+  group_by(Type, Animal) %>% 
+  summarise(
+    nEntries  = n(),
+    nVols     = n_distinct(User.ID),
+    sum.Hours = sum(Duration),
+    avg.Hours = round(mean(Duration), 2),
+    med.Hours = round(median(Duration), 2),
+    sd.Hours  = round(sd(Duration), 2),
+    HrPerVol  = round(sum.Hours/nVols, 2)) %>% 
+  
+  ggplot(aes(x=Type, y=sum.Hours/1000, fill=Animal)) + 
+  geom_bar(stat="identity", color="black") +
+  
+  scale_fill_brewer(palette = "Dark2") + guides(fill=guide_legend(nrow=2,byrow=TRUE)) +
+  coord_flip() + theme_UT() + labs(x="Type of Activity", y="Total Hours (x1000)",
+                    title="Total Hours By Activity Type, By Animal")
+citation.apa("Figure 04")
+```
+
+
+
+
+
+# 5. Cumulative Hours In 2015
+
+## 5.1 By Activity Type
+
+```{r Hours Fig05-A, include=FALSE}
+Hours %>%
+  # Transform
+  group_by(Type) %>% mutate(cum.Hour = order_by(Date.Vol, cumsum(Duration))) %>% 
+  
+  # Plot
+  ggplot(aes(x=Date.Vol, y=cum.Hour, color=Type)) + 
+  geom_jitter(alpha=0.3) + geom_smooth() +
+    ## scales
+  scale_color_brewer(palette = "Set1") + guides(color=guide_legend(nrow=3,byrow=TRUE)) +
+    ## theme
+  theme_UT() + labs(x="Time", y="Cumulative Hours",
+                    title="Cumulative Hours By Activity Type")
+```
+```{r}
+plotly::ggplotly()
+```
+
+## 5.2 By Animal Type
+
+```{r Hours Fig05-B, include=FALSE}
+Hours %>%
+  # Transform
+  group_by(Animal) %>% mutate(cum.Hour = order_by(Date.Vol, cumsum(Duration))) %>% 
+  
+  # Plot
+  ggplot(aes(x=Date.Vol, y=cum.Hour, color=Animal)) + 
+  geom_jitter(alpha=0.3) + geom_smooth() +
+    ## scales
+  scale_color_brewer(palette = "Dark2") + guides(color=guide_legend(nrow=2,byrow=TRUE)) +
+    ## theme
+  theme_UT() + labs(x="Time", y="Cumulative Hours",
+                    title="Cumulative Hours By Animal Type")
+```
+```{r}
+plotly::ggplotly()
+```
+
+## 5.3 By Location Volunteered
+
+```{r Hours Fig05-C, include=FALSE}
+Hours %>%
+  # Transform
+  group_by(Location) %>% mutate(cum.Hour = order_by(Date.Vol, cumsum(Duration))) %>% 
+  
+  # Plot
+  ggplot(aes(x=Date.Vol, y=cum.Hour, color=Location)) + 
+  geom_jitter(alpha=0.3) + geom_smooth() +
+    ## scales
+  scale_color_brewer(palette = "Paired") + guides(color=guide_legend(nrow=2,byrow=TRUE)) +
+    ## theme
+  theme_UT() + labs(x="Time", y="Cumulative Hours",
+                    title="Cumulative Hours By Location Volunteered")
+
+citation.apa("Figure 05[D]")
+```
+```{r}
+plotly::ggplotly()
+``` 
+ 
+# Figure 06 - Density Graph
+```{r Hours Fig06}
+Hours %>%
+  group_by(User.ID, Type, Animal, Location) %>%
+  summarise(
+    Hours    = sum(Duration),
+    nEntries = n()
+  ) %>% ungroup() %>%
+  filter(#Hours>median(Hours), 
+         Location!="Events",
+         Location!="Offsite"
+         ) %>%
+  mutate(Rank = min_rank(desc(Hours))) %>%
+  # summary()
+
+  # Plot
+  ggplot(aes(x=Rank, fill=Type)) + 
+  facet_grid(Animal~Location, scales = "free") +
+  geom_density(alpha=0.5) +
+    ## scales
+  scale_fill_brewer(palette = "Dark2") + guides(fill=guide_legend(nrow=2,byrow=TRUE)) +
+  scale_x_sqrt() +
+    ## theme
+  # facet_grid(Location~Animal, scales = "free") +
+  theme_UT() + labs(x="Time") 
+citation.apa("Figure 06")
+```
+
+# 7. Heatmaps
+
+## 7.1 Activity Type vs Species
+
+### 7.1.1 Total Hours
+
+```{r Fig07-1-1}
+Hours.df <- Hours %>% 
+  filter(Type!="Event", Type!="Facilities", Location!="Events") %>%
+  group_by(Type, Animal) %>%
+  summarise(
+    Hours = sum(Duration),
+    nVols = n_distinct(User.ID)
+  ) %>%
+  mutate(Avg = Hours/nVols) %>%
+  dcast(Type~Animal, value.var = "Hours", fill = 0) %>%
+  group_by(Type) %>%
+  mutate(Both = Cat + Dog) %>%
+  select(Cat, Dog, Both)
+
+row.names(Hours.df) <- Hours.df$Type
+Hours.df$Type <- NULL
+
+d3heatmap::d3heatmap(Hours.df)
+rm(Hours.df)
+```  
+
+### 7.1.2 Average Hours Per Volunteer
+
+```{r Fig07-1-2}
+Hours.df <- Hours %>% 
+  filter(Type!="Event", Type!="Facilities", Location!="Events") %>%
+  group_by(Type, Animal) %>%
+  summarise(
+    Hours = sum(Duration),
+    nVols = n_distinct(User.ID)
+  ) %>%
+  mutate(Avg = Hours/nVols) %>%
+  dcast(Type~Animal, value.var = "Avg", fill = 0) %>%
+  group_by(Type) %>%
+  mutate(Both = Cat + Dog) %>%
+  select(Cat, Dog, Both)
+
+row.names(Hours.df) <- Hours.df$Type
+Hours.df$Type <- NULL
+
+d3heatmap::d3heatmap(Hours.df)
+rm(Hours.df)
+```  
+
+## 7.2 Activity Type vs Month
+
+### 7.2.1 Total Hours
+
+```{r Fig07-2-1}
+Hours.df <- Hours %>% 
+  filter(Type!="Event", Type!="Facilities", Location!="Events") %>%
+  group_by(Type, Month=month(Date.Vol, label=T)) %>%
+  summarise(
+    Hours = sum(Duration),
+    nVols = n_distinct(User.ID)
+  ) %>%
+  mutate(Avg = Hours/nVols) %>%
+  dcast(Type~Month, value.var = "Hours", fill = 0) 
+#   group_by(Type) %>%
+#   mutate(Both = Cat + Dog) %>%
+#   select(Cat, Dog, Both)
+
+row.names(Hours.df) <- Hours.df$Type
+Hours.df$Type <- NULL
+
+d3heatmap::d3heatmap(Hours.df)
+rm(Hours.df)
+```  
+
+### 7.2.2 Average Hours Per Volunteer
+
+```{r Fig07-2-2}
+Hours.df <- Hours %>% 
+  filter(Type!="Event", Type!="Facilities", Location!="Events") %>%
+  group_by(Type, Month=month(Date.Vol, label=T)) %>%
+  summarise(
+    Hours = sum(Duration),
+    nVols = n_distinct(User.ID)
+  ) %>%
+  mutate(Avg = Hours/nVols) %>%
+  dcast(Type~Month, value.var = "Avg", fill = 0) 
+#   group_by(Type) %>%
+#   mutate(Both = Cat + Dog) %>%
+#   select(Cat, Dog, Both)
+
+row.names(Hours.df) <- Hours.df$Type
+Hours.df$Type <- NULL
+
+d3heatmap::d3heatmap(Hours.df)
+rm(Hours.df)
+```  
+
+
+<h1>Contact</h1>
+
+**Hunter Ratliff**
+
+Email: hunterratliff1@gmail.com   
+Twitter: @[HunterRatliff1](https://twitter.com/HunterRatliff1)   
+Github: [HunterRatliff1](https://github.com/hunterratliff1)   
+RPubs: [HunterRatliff1](rpubs.com/HunterRatliff1)   
+
+**Austin Pets Alive Contact Info**
+
+[Adopt](adopt@austinpetsalive.org)  |  [Donate](donate@austinpetsalive.org)  |   [Foster](mailto:foster@austinpetsalive.org)  |  [Volunteer](volunteer@austinpetsalive.org)
+
+
+[MY EMAIL](hunter.ratliff@austinpetsalive.org): Out of respect for the time of our staff/volunteers, please direct all data requests and more technical inquires to my email!
+
+
+
+
+```
+Copyright (C) 2015 Hunter Ratliff, Austin Pets Alive
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+```
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+Information About the R Session at the time it was compiled (for the purposes of [Reproducible Research](https://cran.r-project.org/web/views/ReproducibleResearch.html))
+
+```{r Session_info, echo=TRUE, collapse=TRUE}
+devtools::session_info()
+```
+
+Source Code on [Github]()
