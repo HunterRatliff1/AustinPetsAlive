@@ -1,0 +1,574 @@
+---
+title: "Engagement Rate"
+author: "Hunter Ratliff"
+date: "December 16, 2015"
+output: 
+  html_document:
+    css: Styles.css
+    theme: united
+    toc: true
+---    
+
+<!-- Functions, Globals, ... --> 
+\usepackage{booktabs}
+```{r global_options, include=FALSE}
+## Sets output for figures
+knitr::opts_chunk$set(fig.width=8, fig.height=8, fig.path='Figures-Engagement/',
+                      echo=F, warning=FALSE, message=FALSE, fig.align='center')
+
+## Required packages
+packs.wrangle <- c("googlesheets", "dplyr", "reshape2", "tidyr", "lubridate", "stringi")
+packs.display <- c("ggplot2", "ggthemes", "scales", "RColorBrewer", "gridExtra", "xtable")
+sapply(c(packs.wrangle, packs.display, "devtools", "knitr"), require, character.only=TRUE)  
+         
+## Citation functions
+source("~/Github/Citations/Citation Function.R")
+rm(citation.date, citation.htr)
+
+## Theme function
+source("/Users/main/Github/Austin Pets Alive/Scripts/theme_APA.R")
+
+# Authorize with Google Drive
+(my_sheets <- gs_ls())
+rm(my_sheets)
+
+### contributing source:
+# https://rstudio-pubs-static.s3.amazonaws.com/31867_8236987cf0a8444e962ccd2aec46d9c3.html
+```
+<!-- End --> 
+
+<!-- Load Data From Google Sheets --> 
+```{r Vol_Hours}
+Vol_Hours <- gs_title("VolunteerHours2015") %>% gs_read_csv("2015-12-18") %>%
+  select(-Category.ID, -Activity.ID) 
+
+# ref <- gs_title("VolunteerHours2015") %>% gs_read_csv() %>% select(Category, Activity, Category.ID) %>% unique()
+# ref$branch <- sapply(ref$Category, function(x) {
+#     if(grepl("Dog", x)  |  grepl("Parvo", x)  |  grepl("Rufftail", x)) return("Dog")
+#     if(grepl("Cat", x)  |  grepl("Neonatal", x)) return("Cat")
+#     return("Support")
+# })
+# ref$RefNum <- c(1:nrow(ref))
+  
+# Parse Dates
+Vol_Hours$Date  <- mdy_hms(Vol_Hours$Date) %>% floor_date(unit = "day")
+Vol_Hours$Start <- hm(Vol_Hours$Start)
+Vol_Hours$End   <- hm(Vol_Hours$End)
+Vol_Hours$Timeclocked <- ifelse(!is.na(Vol_Hours$Start) & !is.na(Vol_Hours$End), TRUE, FALSE)
+
+## Seperate into types
+Vol_Hours$Type <- sapply(Vol_Hours$Category, function(x) {
+    if(grepl("Dog", x)  |  grepl("Parvo", x)  |  grepl("Rufftail", x)) return("Dog")
+    if(grepl("Cat", x)  |  grepl("Neonatal", x)) return("Cat")
+    return("Support")
+})
+Vol_Hours$Type <- as.factor(Vol_Hours$Type)
+
+## Make category factors
+Vol_Hours$Category <- sapply(Vol_Hours$Category, function(x) {
+  x <- gsub("Dog Program - ", "", x)
+  x <- gsub("Cat Program - ", "", x)
+  x <- gsub("Behind the Scenes", "BTS", x)
+  x <- gsub("Volunteer Coordination", "VC", x)
+  x <- gsub("Existing Volunteers \\(Already Attended Orientation\\)", "ExistingVols", x)
+  x <- gsub("Events/PET Squad", "Events", x)
+  x <- gsub("General, Administrative & Facilities", "Admin", x)
+  x <- gsub("Community Service Restitution", "CSR", x)
+  x <- gsub("Specialty - Neonatal \\(BB\\)", "BB", x)
+  x <- gsub("Greeters - TLAC", "Greeters", x)
+  x <- gsub("New Volunteers", "NewVols", x)
+  x <- gsub("Offsite Catteries", "Offsite", x )
+  x <- gsub("Medical Clinic", "Clinic", x)
+  x <- gsub("American Pets Alive!", "AmPA", x)
+  x <- gsub("Virtual Foster", "VirtualFoster", x)
+  x <- gsub("Volunteer Social Events", "Social", x)
+  x <- gsub("Marketing - General", "Marketing", x)
+  x <- gsub("Merchandise",  "Marketing", x)
+  x <- gsub("Specialty - Parvo ICU", "Parvo", x)
+  x <- gsub("Rufftail Runners", "RTR", x)
+  x <- gsub("Big Brother/Big Sister", "BBBS", x)
+  x <- gsub("Offsite Adoptions", "Offsite", x)
+  return(x)
+})
+# Make factor
+Vol_Hours$Category <- factor(Vol_Hours$Category)
+
+Vol_Hours <- select(Vol_Hours, Date, User.ID, Hours, Type)
+```
+```{r Vol_Profs}
+Vol_Profs <- gs_title("Vol2_Profile_Export") %>% gs_read_csv() %>% 
+  select(User.ID=DatabaseUserId, 
+         FName=FirstName, LName=LastName, 
+         Admin=AdministratorStatus, 
+         Hours = HoursWorked,
+         
+         Date.Created = ProfileCreated, 
+         Date.Joined  = DateJoined,
+         Orientation  = Q...General...Orientation,
+         Date.Updated = ProfileUpdated, 
+         Date.Login   = LastLoginDate,
+         
+         Status          = VolunteerStatus, 
+         Status.Inactive = VolunteerInactiveStatusReason, 
+         Status.Archived = VolunteerArchivedStatusReason,
+         Status.Date     = DateOfLastVolunteerStatusChange,
+
+         Q.TeamLead    = Q...Generic.Team.Leader,
+         Q.Staff       = Q...APA..Staff,
+         Q.Age         = Q...Age...Minimum,
+         Q.AnimalQuals = Q...Animal.Qualifications,
+         Q.Email.Welcm = Q...Sent.Welcome.Email,
+         Q.Email.Jmpst = Q...Sent.RTR.JumpStart.Email,
+         
+         starts_with("CF"))
+
+names(Vol_Profs) <- gsub("CF.+Questions\\.\\.\\.", "", names(Vol_Profs))
+names(Vol_Profs) <- sapply(names(Vol_Profs), function(x) ifelse(grepl("^CF", x), "CSR", x))
+names(Vol_Profs) <- sapply(names(Vol_Profs), function(x) {
+  x <- gsub("Check.here.if.you.have.attended.RuffTail.Runner.Training.", "Has.RTR", x)
+  x <- gsub("RuffTail.Runner.Training.Date", "Date.RTR", x)
+  x <- gsub("Have.you.already.attended.an.APA..volunteer.orientation.session.", "Orientation.Old", x)
+  x <- gsub("Completed.Orientation.Date..1.", "Orientation.Old.Date1", x)
+  x <- gsub("Break.Out.Session.Attended..Date.1.", "Orientation.Old.Type1", x)
+  x <- gsub("Completed.Orientation.Date..2.", "Orientation.Old.Date2", x)
+  x <- gsub("Break.Out.Session.Attended..Date.2.", "Orientation.Old.Type2", x)
+  return(x)
+}) 
+
+Vol_Profs$Admin <- as.factor(Vol_Profs$Admin)   
+Vol_Profs$Hours <- round(Vol_Profs$Hours, 0)   
+Vol_Profs$Date.Created    <- mdy_hms(Vol_Profs$Date.Created) %>% floor_date(unit = "day")
+Vol_Profs$Date.Joined     <- mdy_hms(Vol_Profs$Date.Joined) %>% floor_date(unit = "day")
+Vol_Profs$Orientation     <- mdy(Vol_Profs$Orientation)   
+Vol_Profs$Date.Updated    <- mdy_hms(Vol_Profs$Date.Updated) %>% floor_date(unit = "day")
+Vol_Profs$Date.Login      <- mdy_hms(Vol_Profs$Date.Login) %>% floor_date(unit = "day")
+Vol_Profs$Status          <- as.factor(Vol_Profs$Status)   
+Vol_Profs$Status.Inactive <- as.factor(Vol_Profs$Status.Inactive)   
+Vol_Profs$Status.Archived  <- as.factor(Vol_Profs$Status.Archived)   
+Vol_Profs$Status.Date     <- mdy_hms(Vol_Profs$Status.Date) %>% floor_date(unit = "day")
+Vol_Profs$Q.Age           <- gsub(" \\(.+\\)", "", Vol_Profs$Q.Age)
+Vol_Profs$Q.Age           <- as.factor(Vol_Profs$Q.Age)
+Vol_Profs$Q.AnimalQuals   <- as.factor(Vol_Profs$Q.AnimalQuals)
+Vol_Profs$CSR             <- sapply(Vol_Profs$CSR, function(x) ifelse(x=="Yes", TRUE, FALSE))
+Vol_Profs$Orientation.Old <- as.factor(Vol_Profs$Orientation.Old)
+Vol_Profs$Has.RTR         <- as.factor(Vol_Profs$Has.RTR)
+
+
+
+Vol_Profs <- Vol_Profs %>% 
+  filter(!is.na(Orientation), is.na(Q.TeamLead), is.na(Q.Staff), 
+         Status!="Inactive", !is.na(Q.Age)) %>% 
+  select(-Q.TeamLead, -Q.Staff, -Q.AnimalQuals, -Status.Inactive, -FName, -LName,
+         -Orientation.Old.Date1, -Orientation.Old.Type1, 
+         -Orientation.Old.Date2, -Orientation.Old.Type2)
+
+## Create a category based on the number of hours logged
+Vol_Profs$Hours.Bin <- sapply(Vol_Profs$Hours, function(x) {
+  if(x==0)           return("0")
+  if(x>0    & x<5)   return("1-5")
+  if(x>=5   & x<10)  return("5-10")
+  if(x>=10  & x<20)  return("10-20")
+  if(x>=20  & x<30)  return("20-30")
+  if(x>=30  & x<50)  return("30-50")
+  if(x>=50  & x<100) return("50-100")
+  if(x>=100 & x<200) return("100-200")
+  if(x>=200 & x<500) return("200-500")
+  return("500+")
+})
+# Make these ordered factors
+Vol_Profs$Hours.Bin <- factor(Vol_Profs$Hours.Bin,
+                                levels = c("0", "1-5", "5-10", "10-20", "20-30", "30-50", 
+                                           "50-100", "100-200", "200-500", "500+"), ordered = T)
+
+```
+<!-- End --> 
+
+********************************************************
+
+# 1. By The Aggregate Numbers By Orientation Date
+
+## Number of Active-Status Volunteers 
+
+```{r Fig01, fig.height=6}
+Vol_Profs %>% 
+  ## Transform 
+  mutate(Month = month(Orientation, label = T)) %>%
+  
+  ## Visualize
+  ggplot(aes(x=Month, fill=Status)) + 
+  geom_histogram() + 
+    # scales
+  scale_fill_manual(values=c("#3B7D00", "#05375A")) + 
+    # theme
+  theme_APA() + labs(x="Month Attended Orientation", y="Count", title="Status By Orientation Date")
+
+citation.apa("Figure 01")
+```
+
+```{r Table01-2014}
+Table01 <- Vol_Profs %>% group_by(Orientation, Status) %>%
+  summarise(Count=n()) %>% ungroup() %>%
+  arrange(Orientation) 
+
+filter(Table01, year(Orientation)==2014) %>% 
+  dcast(Orientation ~ Status) %>% 
+  kable(caption = "Status by Orientation Date (2014)")
+
+```
+
+```{r Table01-2015}
+filter(Table01, year(Orientation)==2015) %>% 
+  dcast(Orientation ~ Status) %>% 
+  kable(caption = "Status by Orientation Date (2015)")
+rm(Table01)
+```   
+
+
+## Number of Volunteers With Hours
+
+Here's a histogram showing the number of volunteers who went through orientation (`Figure 02A`). Each orientation date is further broken down by the fill-color, representing the number of volunteers who have `Hours > 0`.
+
+```{r Fig02A, fig.height=6}
+Vol_Profs %>% 
+  mutate(Has.Hours = ifelse(Hours>0, "Has Logged Hours", "No Hours Logged")) %>% 
+  ggplot(aes(x=Orientation, fill=Has.Hours)) + 
+  geom_histogram() + theme_APA() +
+  scale_fill_manual(name="Number of Hours Logged", values=c("#3B7D00", "#8C2600")) + 
+  labs(y="Count", title="Logged Any Hours By Orientation Date")
+citation.apa("Figure 02A")
+```
+
+<br>
+`Figure 02B` is the same graph as `Figure 02A`, only the y-axis has been changed to reflect the percentage who have logged any hours (as opposed to the count in the previous figure).
+
+```{r Fig02B, fig.height=6}
+Vol_Profs %>% 
+  ## Transform 
+    # categorize by if they have any hours
+  mutate(Has.Hours = ifelse(Hours>0, "Has Logged Hours", "No Hours Logged")) %>% 
+  
+  ## Visualize
+  ggplot(aes(x=Orientation, fill=Has.Hours)) + 
+  geom_histogram(position = "fill", alpha=0.75) + 
+    # scales
+  scale_fill_manual(name="Number of Hours Logged", values=c("#3B7D00", "#8C2600")) + 
+  scale_y_continuous(labels = percent) +
+    # theme
+  theme_APA() + labs(y="Percentage", title="Logged Any Hours By Orientation Date") 
+
+citation.apa("Figure 02B")
+```
+
+<hr>
+`Figure 03` is similar to the previous visualization reflecting the percentage of people who have logged any hours, but goes into a little more of a nuanced perspective. The graph is faceted by the year in which the orientation took place, and each bar represents an unique orientation (in the previous figures, dates were aggregated together into bins). Each bar is filled by a color representing the month, and the transpecrancy of each bar relfects the total number of volunteers who attended that orientation.
+
+```{r Fig03, fig.height=6}
+  Vol_Profs %>% 
+  ## Transform 
+    # categorize by if they have any hours
+  mutate(Has.Hours = ifelse(Hours>0, "Has.Logged.Hours", "No.Hours.Logged")) %>% 
+    # count number of vols for each group, by orientation
+  group_by(Orientation, Has.Hours) %>%
+  summarise(Count=n()) %>%
+    # cast data frame by grouping
+  dcast(Orientation ~ Has.Hours) %>%
+    # create variables reprenting the total number for each orientation, the percent
+    # who logged hours, and the month and year of the orientation
+  mutate(
+    Total.Attend  = Has.Logged.Hours+No.Hours.Logged,
+    Percent.Start = Has.Logged.Hours/(Total.Attend),
+    Month         = month(Orientation, label=TRUE),
+    Year          = year(Orientation)) %>%
+    # select the variables we'll need
+  select(Orientation, Percent.Start, Total.Attend, Month, Year) %>%
+  
+  ## Visualize
+  ggplot(aes(x=Month, fill=Month, y=Percent.Start, alpha=Total.Attend)) +
+  geom_bar(aes(group=Orientation), stat="identity", position="dodge", color="black") + 
+  facet_wrap("Year", ncol=1) +
+    # scales
+  scale_y_continuous(limits=c(0,1), labels = percent) + 
+  scale_alpha(name="Total Attendence") +
+  guides(fill=guide_legend(nrow=2,byrow=TRUE)) + # make the legand have two rows
+    # theme
+  theme_APA() + theme(
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_line(linetype = "dashed", color="#3A7299", size=0.50)) + 
+  labs(y="Percentage Who Start")
+
+citation.apa("Figure 03")
+```
+
+## Total Hours Logged
+
+```{r Fig04, fig.height=6}
+Vol_Profs %>%
+  ## Transform 
+  mutate(Year = year(Orientation)) %>%
+  
+  ## Visualize
+  ggplot(aes(x=Orientation, fill=Hours.Bin)) + 
+  geom_histogram() +
+    # scales
+  scale_fill_brewer(name="Number of Hours Logged", palette = "RdYlBu") + 
+  guides(fill=guide_legend(nrow=2,byrow=TRUE)) + # make the legand have two rows
+    # theme
+  theme_APA() + labs(y="Count", title="Logged Any Hours By Orientation Date")
+  
+citation.apa("Figure 04")
+```
+
+
+
+## Average Number of Hours Logged Per Volunteer
+
+********************************************************
+
+# 2. Focusing on Volunteers From 2015 Only
+
+```{r Select2015, echo=TRUE}
+## Select hours that were logged in 2015 only
+Hours.2015 <- Vol_Hours %>%
+  filter(Date > ymd("2015-01-01"),
+         Date < ymd("2015-12-18"))
+
+## Select profiles with an orientation date in 2015 only
+Profs.2015 <- Vol_Profs %>% 
+  select(User.ID, Status, Age=Q.Age, Hours.Total=Hours,
+         Start=Orientation, End=Status.Date, Login=Date.Login) %>%
+  filter(Start > ymd("2015-01-01"),
+         Start < ymd("2015-12-18"))
+
+# If a volunteer still has the 'Accepted' status, mark their end date 
+# as Dec 18th
+Profs.2015$End[Profs.2015$Status=="Accepted"] <- ymd("2015-12-18")
+
+## Join the Hours data frame with the profiles by User.ID using a left 
+## join, then filter out any hours that didn't come from volunteers 
+## who did their orientetion in 2015
+df.2015 <- left_join(Hours.2015, Profs.2015, by = "User.ID") %>% 
+  filter(!is.na(Status)) %>% 
+  # make variable measuing days since  vols orientation
+  mutate(SinceOrt = as.numeric(difftime(as.Date(Date), 
+                                        as.Date(Start), 
+                                        units = "days"))) %>%
+  filter(SinceOrt>=0) %>% tbl_df()
+```
+
+## Overview
+
+In 2015, we had a total of `r n_distinct(df.2015$Start)` orientation dates, during which a sum of `r n_distinct(df.2015$User.ID)` volunteers attended. Below are a few tables showing the cross sectional breakdowns of this cohort:
+
+
+```{r Ages.2015}
+Profs.2015 %>%
+  group_by(Start, Age) %>%
+  summarise(Count = n()) %>% 
+  dcast(Start ~ Age) %>%
+  ungroup() %>% group_by(Start) %>%
+  mutate(Total = sum(`11-`, `12-15`, `16-17`, `18+`, na.rm = T)) %>%
+  kable(caption = "Age Breakdown by Orientation")
+```
+
+```{r Status.2015}
+Profs.2015 %>%
+  group_by(Start, Status) %>%
+  summarise(Count = n()) %>% 
+  dcast(Start ~ Status) %>%
+  ungroup() %>% group_by(Start) %>%
+  mutate(Total = sum(Accepted, Archived, na.rm = T)) %>%
+  kable(caption = "Status Breakdown by Orientation")
+```
+
+
+```{r Fig05, fig.width=12, fig.height=12}
+Profs.2015 %>% 
+  ## Visualize 
+  ggplot(aes(x=Start)) + 
+  geom_pointrange(aes(y=Login, ymin=Start, ymax=End, color=Hours.Total), alpha=0.25, position = "dodge") + 
+  geom_point(aes(y=Login, color=Hours.Total), alpha=0.5, position = "dodge") + 
+  facet_wrap("Status", ncol=1) + 
+  
+    # scales
+  scale_color_continuous_tableau(name="Total Hours") +
+  coord_flip() + 
+    # theme
+  theme_APA() + labs(y="Date of Orientation", x="Date of Last Login")
+
+citation.apa("Figure 05")
+```
+
+## What Does The First 90 Days Look Like?
+
+### First Login
+
+```{r Fig06, fig.height=6}
+df.2015 %>% 
+  ## Transform
+  # filter to only select the first 90 days post-orientation
+  filter(SinceOrt > 0, SinceOrt <= 90,
+         as.Date(Start) < today() - days(90)) %>% 
+  
+  # for each user per orientation, find the following:
+  group_by(Start, User.ID) %>% summarise(
+    Min    = min(SinceOrt),    # First day volunteered
+    Count  = n(),              # Number of entries in first 90 days
+    Hours  = sum(Hours)) %>%   # Total hours in first 90 days
+  
+  # for each orientation date, find the following:
+  ungroup() %>% group_by(Start) %>% mutate(
+    Min.Avg = mean(Min),               # average number of days it took vols to log hours
+    Min.Med = median(Min),             # median of above
+    Min.Var = var(Min),                # variance of above
+    nStart  = n_distinct(User.ID)) %>% # Number of volunteers who attended and logged hours
+  
+  # join by a summary frame (effectivly adding one varaible) measuring the 
+  # total number of volunteers who attended that orientation
+  #   note: This differs from the nStart variable, because nStart only 
+  #         measures the count who started and doesn't account for those
+  #         who never came back
+  left_join(count(Profs.2015, Start)) %>%
+  
+  ## Visualize 
+  ggplot(aes(x=Start, y=Min, alpha=nStart/n)) +
+  geom_jitter(aes(color=Hours)) + 
+    # scales
+  scale_alpha(name="Percent of Orientation\nWho Started") + 
+  scale_color_continuous_tableau() +
+    # theme
+  theme_APA() + labs(x="Date of Orientation", y="Number of Days After Orientation", 
+       title="How Many Days Pass Until Volunteers Begin Logging Hours?\nA Snapshot of The First 90 Days")
+
+citation.apa("Figure 06")
+  # ggplot(aes(x=Orientation, y=SinceOrt)) + geom_violin(aes(fill=month(Orientation, label = T)))
+  # ggplot(aes(x=Date, y=Begin)) + geom_jitter(aes(shape=Type, size=Hours))
+  # ggplot(aes(x=as.factor(User.ID))) + geom_crossbar(aes( y=Date, ymin=Begin, ymax=Login))
+```
+
+
+
+********************************************************
+
+# (2) By Volunteer's Length of Stay
+
+### How Many Attend Orientation?
+
+
+### How Many Log In Afterwards?
+
+## How Many Volunteers Even Start?
+
+#### Measurement: Number of Entries Logged
+
+1. Threshold: 1 Entry
+2. Threshold: 2 Entries
+3. Threshold: 3 Entries
+4. Threshold: 5 Entries
+5. Threshold: 10 Entries
+6. Threshold: 20 Entries
+
+#### Measurement: Number of Hours Logged
+
+1.  Threshold: Any amount of time
+2.  Threshold: 2 Hours
+3.  Threshold: 5 Hours
+4.  Threshold: 10 Hours
+5.  Threshold: 20 Hours
+6.  Threshold: 50 Hours
+
+### Bonus: How Long Did It Take Them To Get Engaged?
+
+## Of Those Who Start, How Long Are They Engaged?
+
+### How Much Time Passes Between Each Logged Event?
+
+### How Long Until Most Volunteers Stop Volunteering?
+
+#### What's The Shape Of This Curve?
+
+#### Has This Curve Changed Over Time?
+
+### Bonus: What Does This Mean In Terms Of Income/Expenses?
+
+********************************************************
+
+# (3) Types of Volunteers
+
+## Based On Interests
+
+## Based On Age
+
+## Based On Sex
+
+## Based On Employeer
+
+## Types According to <i>Strategic Volunteer Engagement</i>
+
+[Strategic Volunteer Engagement](http://www.volunteeralive.org/docs/Strategic%20Volunteer%20Engagement.pdf)
+
+### Time For Service: <i>Eposodic vs Long Term</i>
+
+### Connection To Service: <i>Affiliation vs Skill Focus</i>
+
+## Consistancy of Volunteer
+
+## Does The Volunteer Volunteer On Other Teams Too? 
+
+********************************************************
+
+# (4) Net Flow
+
+## How Does The Flow Of Volunteers Look Within Each Program?
+
+### Number of Volunteer Over Time
+
+### Number of Hours Logged Over Time
+
+### Influx of Volunteers In/Out From The Team
+
+
+
+<br><br><br>
+<hr>
+# Contact
+<hr>
+**Hunter Ratliff**
+
+Email: hunterratliff1@gmail.com   
+Twitter: @[HunterRatliff1](https://twitter.com/HunterRatliff1)   
+Github: [HunterRatliff1](https://github.com/hunterratliff1)   
+RPubs: [HunterRatliff1](rpubs.com/HunterRatliff1)   
+
+**Austin Pets Alive Contact Info**
+
+[Adopt](adopt@austinpetsalive.org)  |  [Donate](donate@austinpetsalive.org)  |   [Foster](mailto:foster@austinpetsalive.org)  |  [Volunteer](volunteer@austinpetsalive.org)
+
+
+[MY EMAIL](hunter.ratliff@austinpetsalive.org): Out of respect for the time of our staff/volunteers, please direct all data requests and more technical inquires to my email!
+
+
+
+```
+Copyright (C) 2015 Austin Pets Alive, Hunter Ratliff
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+```
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+```{r Session_info, echo=TRUE, collapse=TRUE}
+devtools::session_info()
+```

@@ -1,0 +1,780 @@
+---
+title: "Austin Pets Alive in 2015"
+author: "Hunter Ratliff"
+date: "December 27, 2015"
+output: 
+  html_document:
+    theme: united
+    toc: true
+    css: styles.css
+---
+<!--- SET the Globals --->
+```{r global_options, include=FALSE}
+require(knitr)
+## Define global settings for chunk output
+knitr::opts_chunk$set(fig.width=12, fig.height=10, fig.align='center',      
+                      fig.path='Figures_2015/',                        # Sets output for figures
+                      echo=FALSE, warning=FALSE, message=FALSE)        # Silences most chunk outputs
+
+## Load required packages
+# Make a vector of the names of packages we plan to use
+packs <- c("magrittr", "dplyr", "reshape2", "ggplot2", "lubridate", "RColorBrewer",
+           "stringr", "ggthemes", "scales", "gridExtra", "googlesheets", "plotly")
+
+# Apply the require fxn to each package in list
+sapply(packs, require, character.only=TRUE)
+rm(packs)
+
+## The 'source' function runs the R script of the provided path 
+# See code:         https://github.com/HunterRatliff1/Citations
+source("~/Github/Citations/Citation Function.R")
+rm(citation.htr, citation.date)
+
+## Theme object for ggplots
+source("~/Github/utexas/diveristy/theme_UT.R")
+
+xMatch <- function(p, x)    grepl(pattern=p,               x=x, ignore.case = T)
+```
+
+<!--- READ the data from .rmd file --->
+```{r Read | Profiles}
+# saveRDS(Profiles, file = "~/Github/Austin Pets Alive/07 End of Year 2015/Data/Profiles.RDS")
+Profiles <- readRDS("~/Github/Austin Pets Alive/07 End of Year 2015/Data/Profiles.RDS")
+```
+```{r Read | Hours}
+## See Volunteer_Hours_2015.Rmd ##
+Hours <- readRDS("~/Github/Austin Pets Alive/07 End of Year 2015/Data/Hours.RDS")$value
+
+# Hours <- source("~/Github/Austin Pets Alive/07 End of Year 2015/R/Hours.R")
+# # As factors
+# Hours$Location <- as.factor(Hours$Location)
+# Hours$Animal   <- as.factor(Hours$Animal) 
+# Hours$Type     <- as.factor(Hours$Type)
+# Hours$SubType  <- as.factor(Hours$SubType)
+# 
+# saveRDS(object = Hours, file = "~/Github/Austin Pets Alive/07 End of Year 2015/Data/Hours.RDS")
+```
+```{r Read | Outcomes}
+Outcomes <- readRDS("~/Github/Austin Pets Alive/07 End of Year 2015/Data/Outcomes.RDS")
+Cats     <- readRDS("~/Github/Austin Pets Alive/07 End of Year 2015/Data/Outcomes_Cats.RDS")
+Dogs     <- readRDS("~/Github/Austin Pets Alive/07 End of Year 2015/Data/Outcomes_Dogs.RDS")
+
+# source("~/Github/Austin Pets Alive/07 End of Year 2015/R/Outcomes.R")
+# 
+# saveRDS(object = Outcomes, file = "~/Github/Austin Pets Alive/07 End of Year 2015/Data/Outcomes.RDS")
+# saveRDS(object = Cats, file = "~/Github/Austin Pets Alive/07 End of Year 2015/Data/Outcomes_Cats.RDS")
+# saveRDS(object = Dogs, file = "~/Github/Austin Pets Alive/07 End of Year 2015/Data/Outcomes_Dogs.RDS")
+```
+
+<!--- PROCESS Volunteer Profiles --->
+```{r Read | Profiles, eval=F}
+Profiles <- gs_title("Summary 2015") %>% 
+  gs_read_csv("Profiles") %>%
+  select(-FirstName, -LastName, -Username) %>%
+  rename(   ## Rename column names to be more human readable
+    User.ID     = DatabaseUserId,    # ID variables
+    Hours       = HoursWorked,       # Hours volunteered
+    
+    # Qualification variables
+    isAdmin     = AdministratorStatus,
+    isActive    = VolunteerStatus,
+    Staff       = Q...APA..Staff,
+    
+    # Birthday and employer
+    Birthday1   = Birthday,
+    Birthday2   = CF...General.Information...Date.of.Birth,
+    Employer    = CF...General.Information...Employer,
+    
+    # Time variables
+    Orientation = Q...General...Orientation,
+    RTR_Date    = CF...Training.Questions...RuffTail.Runner.Training.Date,
+    Joined      = DateJoined, 
+    Login       = LastLoginDate) %>%
+  
+  mutate( ## Format some varables
+    
+    # Format the dates as such, dropping the hours and minutes
+    Birthday1 = floor_date(mdy_hms(Birthday1), unit = "day"),
+    Birthday2 = floor_date(mdy_hms(Birthday2), unit = "day"),
+    Login     = floor_date(mdy_hms(Login),     unit = "day"),
+    Joined    = floor_date(mdy_hms(Joined),    unit = "day"),
+    RTR_Date  = floor_date(mdy_hms(RTR_Date),  unit = "day"),
+    
+    # Round the hours to 0 digits
+    Hours     = round(Hours),
+    Started   = ifelse(Hours>0, 1, 0),
+    Has.Hours = ifelse(Hours>0, "Has Hours", "Hasn't Started"))
+
+
+
+
+
+
+## Function that selects birthday 
+# (since the two birthday options are inconsistantly filled out)  
+Profiles$Birthday <- mapply(function(A, B) {
+  if( is.na(A) &  is.na(B)) return(NA)
+  if(!is.na(A) &  is.na(B)) return(A)
+  if( is.na(A) & !is.na(B)) return(B)
+  if(!is.na(A) & !is.na(B)) {
+    if(A==B) return(A)
+    A.yr <- as.numeric(ymd(A) %--% today(), unit="year")
+    B.yr <- as.numeric(ymd(B) %--% today(), unit="year")
+    if(A.yr >= 12  &  A.yr <= 90) return(A)
+    if(B.yr >= 12  &  B.yr <= 90) return(B)
+    else(return(NA))
+  }
+}, as.character(Profiles$Birthday1), as.character(Profiles$Birthday2), SIMPLIFY = T)
+# reparse the birthday variable as a date
+Profiles$Birthday <- ymd(Profiles$Birthday)
+
+
+
+
+
+## Make factors
+Profiles$isAdmin  <- as.factor(Profiles$isAdmin)
+Profiles$isActive <- as.factor(Profiles$isActive)
+
+
+
+
+
+
+## Finally, create the refined Profiles data.frame
+Profiles <- Profiles %>% 
+  # Select our refined columns
+  select(Birthday, User.ID, Joined, Login, isAdmin, isActive, Staff, Hours, Employer, Started) %>%
+  
+  # Filter out staff, then drop that variable
+  filter(is.na(Staff)) %>% select(-Staff) %>%
+  
+  # Filter Birthdays to make things reasonable
+  mutate(Age = as.numeric(Birthday %--% today(), unit="year"))
+
+## Remove erronious ages & round to nearest year
+Profiles$Age[Profiles$Age<12] <- NA
+Profiles$Age[Profiles$Age>85] <- NA
+Profiles$Age <- round(Profiles$Age)
+
+## Define the age groups
+Profiles$Age.Group <- sapply(Profiles$Age, function(x) {
+  if(is.na(x))     return(NA)
+  if(x>=12 & x<18) return("Minor")
+  if(x>=18 & x<23) return("College")
+  if(x>=23 & x<30) return("Adult-Younger")
+  if(x>=30 & x<50) return("Adult")
+  if(x>=50 & x<65) return("Adult-Older")
+  if(x>=65) return("Senior")
+  return("Other")
+})
+# Make ordered factor
+Profiles$Age.Group <- factor(Profiles$Age.Group, 
+                             levels=c("Minor", "College", "Adult-Younger", 
+                                      "Adult", "Adult-Older", "Senior"), ordered=T)
+
+```
+```{r Parse the list of Employeers, eval=F}
+Profiles$Employer.Parse <- sapply(Profiles$Employer, function(x){
+  ## Wrapper functions to clean code up
+  xMatch <- function(p, x)    grepl(pattern=p,               x=x, ignore.case = T)
+  xSub   <- function(p, r, x) gsub(pattern=p, replacement=r, x=x, ignore.case = T)
+  
+  
+  x <- trimws(x)
+  x <- xSub("St\\.",  "St",           x)
+  x <- xSub("'s",     "s",            x)
+  x <- xSub("\\.com", "\\[dot\\]com", x)
+  x <- xSub("www\\.", "",             x)
+  x <- xSub("\\.",    "",             x)
+  
+  x <- xSub(", inc$",  "",  x)
+  x <- xSub(" inc$",   "",  x)
+  x <- xSub(", llc$",  "",  x)
+  x <- xSub(" llc$",   "",  x)
+  x <- xSub(", pllc$", "",  x)
+  x <- xSub(" pllc$",  "",  x)
+  x <- xSub(", llp$",  "",  x)
+  x <- xSub(" llp$",   "",  x)
+  
+  x <- xSub("N/A",  "NA", x)
+  x <- xSub("None", "NA", x)
+  
+  # x <- xSub("AT&T", "AT&T", x)
+  x <- xSub("Dept", "Department", x)
+  x <- xSub("tx", "Texas", x)
+  
+  
+  
+  x <- xSub("University of Texas",         "UTexas",     x)
+  x <- xSub("UTexas at Austin",            "UTexas",     x)
+  x <- xSub("UT Austin",                   "UTexas",     x)
+  x <- xSub("The UTexas",                  "UTexas",     x)
+  x <- xSub("UT-Austin",                   "UTexas",     x)
+  x <- xSub("UTexas Austin",               "UTexas",     x)
+  x <- xSub("Independent School District", "ISD",        x)
+  x <- xSub("School District",             "ISD",        x)
+  x <- xSub("AISD",                        "Austin ISD", x)
+  
+  
+  
+  if(xMatch("^na$", x)) return("NA")
+  if(xMatch("^no$", x)) return("NA")
+  if(xMatch("^-$", x))  return("NA")
+  
+  if(xMatch("Self Employed", x))  return("Self")
+  if(xMatch("Self-employed", x))  return("Self")
+  if(xMatch("self$", x))          return("Self")
+  
+  if(xMatch("Unemployed$", x))    return("Unemployed")
+  if(xMatch("^not employed$", x)) return("Unemployed")
+  if(xMatch("^not working$", x))  return("Unemployed")
+  
+  if(xMatch("Stay", x) & xMatch("home", x))  return("Home")
+  if(xMatch("Stay", x) & xMatch("work", x))  return("Home")
+  if(xMatch("home", x) & xMatch("parnet", x))return("Home")
+  if(xMatch("home", x) & xMatch("mom", x))   return("Home")
+  if(xMatch("home", x) & xMatch("dad", x))   return("Home")
+  if(xMatch("^home$", x))                    return("Home")
+  if(xMatch("^mom$", x))                     return("Home")
+  if(xMatch("housewife", x))                 return("Home")
+  if(xMatch("home", x) & xMatch("maker", x)) return("Home Maker")
+  
+  if(xMatch("Austin pets alive", x))         return("APA")
+  if(xMatch("^APA", x))                      return("APA")
+  
+  if(xMatch("student", x) & grepl("UT", x))  return("UTexas_Student")
+  if(xMatch("student", x) & 
+     xMatch("UTexas", x))                    return("UTexas_Student")
+  if(xMatch("Longhorn Pets Alive", x))       return("UTexas_Student")
+  if(grepl("LPA", x))                        return("UTexas_Student")
+  if(xMatch("student", x))                   return("Student")
+  if(xMatch("^UT$", x))                      return("UTexas")
+  
+  if(xMatch("Disabled", x))                  return("Disabled")
+  if(xMatch("retired", x))                   return("Retired")
+  
+  if(xMatch("David", x))                      return("StDavids")
+  if(xMatch("Seton", x))                      return("Seton")
+  if(xMatch("Dell", x) & xMatch("Child", x))  return("DellChildrens")
+  if(xMatch("Dell", x))                       return("Dell")
+ 
+  return(x)
+})
+```
+```{r Match Employees to the Chamber data, eval=F}
+Chamber <- gs_title("Age & Employeer") %>% 
+  gs_read_csv("Austin_Chamber")
+
+
+xMatch <- function(p, x)    grepl(pattern=p, x=x, ignore.case = T)
+
+Chambs <- Profiles %>% 
+  select(User.ID, Hours, Employer.Parse) %>%
+  mutate(
+    AISD  = xMatch("Austin ISD", Employer.Parse),
+    CoA   = xMatch("Austin", Employer.Parse) & xMatch("City", Employer.Parse),
+    Dell  = xMatch("Dell$", Employer.Parse),
+    Feds  = xMatch("Federal", Employer.Parse) | xMatch("Veterans Affairs", Employer.Parse) | 
+              xMatch("Revenue Service", Employer.Parse) | xMatch("^IRS", Employer.Parse) |
+              xMatch("^US ", Employer.Parse) | xMatch("gov", Employer.Parse) & 
+                !xMatch("Credit", Employer.Parse),
+    IBM   = xMatch("IBM", Employer.Parse),
+    Seton = xMatch("Seton", Employer.Parse),
+    StDvd = xMatch("StDavids", Employer.Parse),
+    SoTX  = xMatch("State", Employer.Parse) & xMatch("Texas", Employer.Parse) & 
+              !xMatch("Univ", Employer.Parse),
+    UTexas = xMatch("UTexas", Employer.Parse) & !xMatch("Student", Employer.Parse),
+    Accn = xMatch("Accenture", Employer.Parse),
+    Appl = xMatch("Apple", Employer.Parse),
+    AppM = xMatch("Applied Materials", Employer.Parse),
+    ATnT = xMatch("AT&T", Employer.Parse),
+    AAC  = xMatch("^ACC$", Employer.Parse) | xMatch("Austin", Employer.Parse) & 
+             xMatch("College", Employer.Parse) & xMatch("Community", Employer.Parse),
+    Flxtr = xMatch("Flextronics", Employer.Parse),
+    Frscl = xMatch("Freescale", Employer.Parse),
+    HISD  = xMatch("HISD", Employer.Parse) | 
+              xMatch("Hays", Employer.Parse) & xMatch("ISD", Employer.Parse),
+    KllrW = xMatch("Keller Williams", Employer.Parse),
+    LISD  = xMatch("LISD", Employer.Parse) | 
+              xMatch("Leander", Employer.Parse) & xMatch("ISD", Employer.Parse),
+    NtnlI = xMatch("National Instruments", Employer.Parse),
+    PfISD = xMatch("PISD", Employer.Parse) | 
+              xMatch("Pflugerville", Employer.Parse) & xMatch("ISD", Employer.Parse),
+    RRISD = xMatch("RRISD", Employer.Parse) | 
+              xMatch("Round Rock", Employer.Parse) & xMatch("ISD", Employer.Parse),
+    Smsng = xMatch("Samsung", Employer.Parse),
+    TxsSt = xMatch("State", Employer.Parse) & xMatch("Texas", Employer.Parse) & 
+              xMatch("Univ", Employer.Parse),
+    TrvsC = xMatch("Travis", Employer.Parse) | xMatch("County", Employer.Parse),
+    IRS   = xMatch("^IRS", Employer.Parse) | xMatch("Revenue Service", Employer.Parse),
+    WhlFd = xMatch("Whole Foods", Employer.Parse),
+    MMM   = xMatch("3M", Employer.Parse),
+    AMD   = xMatch("^AMD$", Employer.Parse) | xMatch("Advanced Micro", Employer.Parse),
+    AstnE = xMatch("Austin Energy", Employer.Parse),
+    AstRC = xMatch("Austin Regional Clinic", Employer.Parse),
+    BSnW  = xMatch("Baylor Scott", Employer.Parse),
+    ChrlS = xMatch("Charles Schwab", Employer.Parse),
+    GM    = xMatch("^GM$", Employer.Parse) | xMatch("General Motors", Employer.Parse),
+    Gdwll = xMatch("Goodwill", Employer.Parse),
+    HP    = xMatch("^HP$", Employer.Parse) | xMatch("Hewlett", Employer.Parse),
+    HmAwy = xMatch("HomeAway", Employer.Parse),
+    Hospr = xMatch("Hospira", Employer.Parse),
+    Intel = xMatch("Intel", Employer.Parse),
+    LCRA  = xMatch("Colorado River Authority", Employer.Parse) | xMatch("LCRA", Employer.Parse), 
+    Oracl = xMatch("Oracle", Employer.Parse),
+    Prgrs = xMatch("Progressive", Employer.Parse),
+    Sears = xMatch("Sears", Employer.Parse),
+    StFrm = xMatch("State Farm", Employer.Parse),
+    TWC   = xMatch("Time Warner", Employer.Parse) | xMatch("TWC", Employer.Parse),
+    URS   = xMatch("URS", Employer.Parse),
+    VA    = xMatch("Veterans Affairs", Employer.Parse) | xMatch("^VA", Employer.Parse),
+    WllsF = xMatch("Wells Fargo", Employer.Parse),
+    ActvB = xMatch("Activision", Employer.Parse),
+    AmrCC = xMatch("American Campus", Employer.Parse),
+    ACS   = xMatch("American Cancer ", Employer.Parse),
+    BAESy = xMatch("BAE", Employer.Parse),
+    BnkoA = xMatch("Bank", Employer.Parse) & xMatch("America", Employer.Parse),
+    Bzrvc = xMatch("Bazaarvoice", Employer.Parse),
+    CFAN  = xMatch("CFAN", Employer.Parse),
+    CrrsL = xMatch("Cirrus Logic", Employer.Parse),
+    Cisco = xMatch("Cisco", Employer.Parse),
+    ClnPL = xMatch("Clinical Pathology Lab", Employer.Parse),
+    Cncnt = xMatch("Concentrix", Employer.Parse),
+    eBay  = xMatch("eBay", Employer.Parse),
+    ERCoT = xMatch("Electric.+Council", Employer.Parse),
+    ElctA = xMatch("Electronic Arts", Employer.Parse),
+    EmrPM = xMatch("Emerson", Employer.Parse),
+    Facbk = xMatch("Facebook", Employer.Parse),
+    FrmIG = xMatch("Farmers Insurance", Employer.Parse),
+    Googl = xMatch("Google", Employer.Parse),
+    GrndC = xMatch("^Grande$", Employer.Parse) | xMatch("Grande Communications", Employer.Parse),
+    HrtH  = xMatch("Harte.Hank", Employer.Parse),
+    HEB   = xMatch("^HEB", Employer.Parse) | xMatch("H-E-B", Employer.Parse),
+    HmDpt = xMatch("Home Depot", Employer.Parse),
+    ImgMc = xMatch("Image Microsystems", Employer.Parse),
+    JMCnC = xMatch("JP", Employer.Parse) & xMatch("Morgan", Employer.Parse) | 
+              xMatch("Chase", Employer.Parse),
+    ThLqC = xMatch("Liquidation", Employer.Parse),
+    Maxms = xMatch("Maximus", Employer.Parse),
+    Persn = xMatch("Pearson", Employer.Parse),
+    PhrPD = xMatch("Pharma.+Dev", Employer.Parse),
+    Q2    = xMatch("Q2", Employer.Parse),
+    Rcksp = xMatch("Rackspace", Employer.Parse),
+    SlcnL = xMatch("Silicon Lab", Employer.Parse),
+    SlrWn = xMatch("SolarWinds", Employer.Parse),
+    Spnsn = xMatch("Spansion", Employer.Parse),
+    StEdw = xMatch("Edwards", Employer.Parse),
+    Visa  = xMatch("Visa", Employer.Parse),
+    VMWar = xMatch("VMWare", Employer.Parse),
+    Volsn = xMatch("Volusion", Employer.Parse),
+    WynFS = xMatch("Wayne", Employer.Parse),
+    Xerox = xMatch("Xerox", Employer.Parse),
+    Yodle = xMatch("Yodle", Employer.Parse)
+)
+
+Chamb.sum <- Chambs %>% select(-Employer.Parse) %>% 
+  melt(id.vars = c("User.ID", "Hours"), variable.name = "Employer") %>%
+  filter(value) %>% 
+  mutate(Start = ifelse(Hours>0, 1, 0)) %>%
+  group_by(Employer) %>%
+  summarise(Vols = n(), Hours = sum(Hours), Start = sum(Start)) %>%
+  left_join(select(Chamber, Size, Key, Search), by=c("Employer"="Key")) %>%
+  rename(Key=Employer, Employer=Search)
+# Make ordered factor
+Chamb.sum$Size <- factor(Chamb.sum$Size, levels=c("Under 1k", "1-2k", "2-6k", "6k+"), ordered=T)
+
+
+## Replace matched employeers from Chamber data in the 
+## profiles frame
+Profiles <- Chambs %>% select(-Employer.Parse) %>% 
+  melt(id.vars = c("User.ID", "Hours"), variable.name = "Employer") %>%
+  filter(value) %>% 
+  select(User.ID, Key=Employer) %>%
+  left_join(select(Chamber, Key, Employer=Search)) %>%
+  right_join(select(Profiles, -Employer, -isAdmin)) %>%
+  tbl_df()
+
+## Consolidate into a clean frame
+Profiles <- Profiles %>%
+  mutate(Emps = ifelse(is.na(Employer), Employer.Parse, Employer)) %>%
+  select(-Employer, -Key, -Employer.Parse, -Birthday) %>%
+  rename(Employer=Emps)
+
+# Replace "NA" charachter with "None", since NA means no data
+Profiles$Employer[Profiles$Employer=="NA"] <- "No Employer"
+Profiles$Employer[Profiles$Employer=="Self"] <- "Self-Employed"
+
+## Remove Chamber frames
+rm(Chambs, Chamber, Chamb.sum)
+```
+```{r Employer Type, eval=F}
+### This block adds a column indicating the type of employer
+Profiles$Employer.Type <- sapply(Profiles$Employer, function(x){
+  ## Wrapper functions to clean code up
+  xMatch <- function(p, x)    grepl(pattern=p,               x=x, ignore.case = T)
+  xSub   <- function(p, r, x) gsub(pattern=p, replacement=r, x=x, ignore.case = T)
+  
+  if(xMatch("Self", x))       return("Self")
+  
+  if(xMatch("Retired", x))    return("No Employer")
+  if(xMatch("^NA$", x))       return("No Employer")
+  if(xMatch("Unemployed", x)) return("No Employer")
+  if(xMatch("^Home$", x))     return("No Employer")
+  if(xMatch("Disabled", x))   return("No Employer")
+  if(xMatch("None", x))       return("No Employer")
+  
+  
+  if(xMatch("Student", x))    return("Education")
+  if(grepl("ISD", x))         return("Education")
+  if(xMatch("University", x)) return("Education")
+  if(xMatch("College", x))    return("Education")
+  if(xMatch("School", x))     return("Education")
+  if(xMatch("Texas State", x))return("Education")
+  if(xMatch("St Edwards", x)) return("Education")
+  if(xMatch("UTexas", x))     return("Education")
+  if(xMatch("Teacher", x))    return("Education")
+  
+  
+  if(xMatch("Seton", x))         return("Healthcare")
+  if(xMatch("DellChildrens", x)) return("Healthcare")
+  if(xMatch("StDavids", x))      return("Healthcare")
+  if(xMatch("Hospital", x))      return("Healthcare")
+  if(xMatch("Medical", x))       return("Healthcare")
+  if(xMatch("Clinic", x))        return("Healthcare")
+  if(xMatch("Baylor Scott", x))  return("Healthcare")
+  
+  
+  if(xMatch("Department", x) & xMatch("Texas", x))         return("Gov")
+  if(xMatch("State", x) & xMatch("Texas", x))              return("Gov")
+  if(xMatch("Department", x) & xMatch("Austin", x))        return("Gov")
+  if(xMatch("City", x) & xMatch("Austin", x))              return("Gov")
+  if(xMatch("Travis", x) & xMatch("County", x))            return("Gov")
+  if(xMatch("Federal", x))                                 return("Gov")
+  if(xMatch("IRS", x))                                     return("Gov")
+  if(xMatch("Veterans Affairs", x))                        return("Gov")
+  if(xMatch("Human Services", x) & xMatch("Texas", x))     return("Gov")
+  if(xMatch("Human Services", x) & xMatch("Austin", x))    return("Gov")
+  if(xMatch("Human Services", x) & xMatch("US", x))        return("Gov")
+  if(xMatch("Internal Revenue", x))                        return("Gov")
+  if(xMatch("Human Services", x))                          return("Gov")
+  if(xMatch("Government", x))                              return("Gov")
+  
+  if(is.na(x)) return(NA)
+  return("Other")
+})
+
+# Make factor
+Profiles$Employer.Type <- as.factor(Profiles$Employer.Type)
+```
+
+<!--- JOIN 'Volunteer hours' & 'Outcomes'--->
+```{r}
+
+
+names(Outcomes)
+Outcomes %>%
+  group_by(Date=floor_date(Date, "day"), Species, Age.Group) %>%
+  summarise(Adoptions = n()) %>%
+  # dcast(Date+Age.Group~Species) %>%
+  tbl_df() %>% 
+  ggplot(aes(x=Date, y=Adoptions, color=Species)) + 
+  # stat_summary_bin() +
+  geom_smooth() +
+  stat_summary_bin(aes(x=floor_date(Date, "week")), alpha=0.3) +
+  scale_color_fivethirtyeight() + labs(title="Daily Adoption Rate") +
+  theme_UT()
+```
+
+```{r}
+df <- Hours %>%
+  group_by(Week=floor_date(Date.Vol, "week"), Animal) %>%
+  summarise(
+    nVols = n_distinct(User.ID),
+    Hours = sum(Duration))
+
+Outcomes %>%
+  group_by(Date=floor_date(Date, "day"), Species) %>%
+  summarise(Adoptions = n()) %>% mutate(
+    Week = floor_date(Date, "week"),
+    DoW  = wday(Date, label = T)) %>%
+  group_by(Week) %>% mutate(
+    Adoptions.week=sum(Adoptions)
+  ) %>% ungroup() %>%
+  
+  ggplot(aes(x=Week, y=Adoptions)) + 
+  geom_bar(aes(fill=DoW), stat="identity") + 
+  geom_smooth(aes(y=Adoptions.week), color="black") +
+  scale_fill_brewer(type = "div", palette = 3) + theme_UT()
+```
+
+```{r}
+Hours %>%
+  mutate(Species = ifelse(Animal!="Dog" & Animal!="Cat", "Other", Animal)) %>%
+  group_by(Date=floor_date(Date.Vol, "week"), Species) %>%
+  summarise(
+    nVols = n_distinct(User.ID),
+    Hours = sum(Duration)) %>%
+  left_join(
+    summarise(group_by(Outcomes, Date=floor_date(Date, "week"), Species), Adoptions = n())
+  ) %>% 
+  melt(id.vars = c("Date", "Species"), na.rm = T,
+       variable.name = "Measure", value.name = "Value") %>%
+  ggplot(aes(x=Date, y=Value, color=Species, linetype=Measure)) +
+  geom_smooth() +
+#     geom_smooth(aes(y=nVols), linetype="dashed") +
+#     geom_smooth(aes(y=Hours/10), linetype="dotted") +
+#     geom_smooth(aes(y=Adoptions)) +
+    scale_color_brewer(palette = "Dark2") + 
+    theme_UT()
+
+  
+  
+#   ggplot(aes(x=Date, y=Adoptions)) + 
+#   geom_bar(aes(fill=Species), stat="identity", alpha=0.3) + 
+#   geom_smooth(aes(color=Species), linetype="dotted") +
+#   geom_smooth(data=df, aes(x=Week, y=Hours/10, color=Species)) +
+  
+  # scale_fill_brewer(palette = "Dark2") + theme_UT()
+
+```
+
+
+<!--- PLOT: Outcomes --->
+# 1. Adoptions vs Age, By Species
+```{r Fig01, fig.width=8, fig.height=8}
+fig.01 <- Outcomes %>%
+  # Transform
+  filter(Status!="Untreatable") %>%
+  
+  # Plot
+  ggplot(aes(x=Age.Month/12, fill=Species), color="black") + 
+  geom_histogram(aes(y=..count..), binwidth = 0.25) +
+    ## scales
+  scale_fill_brewer(palette = "Dark2") +
+    ## theme
+  labs(x="Age (in Years)", y="Number of Adoptions", 
+                    title="Adoptions By Age, By Species") + theme_UT()
+ggplotly(fig.01)
+```
+
+# 2. Adoptions in 2015, By Location
+## 2.1 Dogs
+```{r Fig02-1, fig.width=8, fig.height=8}
+fig.02.Dog <- Dogs %>%
+  mutate(Week = month(Date, label = T)) %>%
+  group_by(Week, Location=SubType) %>%
+  summarise(Adoptions=n()) %>%
+  ggplot(aes(x=Week, y=Adoptions, fill=Location)) +
+  geom_bar(stat="identity") + scale_fill_brewer(palette = "Set1") +
+  labs(x="", title="Dog Adoptions In 2015, By Location") + theme_UT()
+ggplotly(fig.02.Dog)
+```
+
+## 2.2 Cats
+```{r Fig02-2, fig.width=8, fig.height=8}
+fig.02.Cat <- Cats %>%
+  mutate(Week = month(Date, label = T)) %>%
+  group_by(Week, Location=SubType) %>%
+  summarise(Adoptions=n()) %>%
+  ggplot(aes(x=Week, y=Adoptions, fill=Location)) +
+  geom_bar(stat="identity") + scale_fill_brewer(palette = "Set1") +
+  labs(x="", title="Cat Adoptions In 2015, By Location") + theme_UT()
+ggplotly(fig.02.Cat)
+```
+
+# 3. Heatmap of Adoptions, By Age & Location
+## 3.1 Dogs
+```{r Fig03-1, fig.width=8, fig.height=8}
+# fig.03.Dog <- Dogs %>%
+#   group_by(Location=SubType, Age.Group) %>%
+#   summarise(Adoptions = n()) %>%
+#   dcast(Location~Age.Group)
+# row.names(fig.03.Dog) <- fig.03.Dog$Location
+# fig.03.Dog$Location <- NULL
+# d3heatmap::d3heatmap(fig.03.Dog, scale="row", colors="YlOrRd")
+
+# # Using plotly
+Dogs %>%
+  plot_ly(type="histogram2d", x=Age.Group, y=SubType, colorscale="YlOrRd") %>%
+  layout(title="Dog Adoptions, By Age & Location", xaxis=list(title=""), yaxis=list(title=""),
+         titlefont = list(family = "Open Sans"))
+# function(df=Dogs, )
+# fig.03.Dog <- Dogs %>%
+#   group_by(Location=SubType, Age.Group) %>%
+#   summarise(Adoptions = n()) %>%
+#   ggplot(aes(Age.Group, Location, fill=Adoptions)) + geom_tile() +
+#   scale_fill_gradientn(colors=brewer.pal(7, "YlOrRd")) +
+#   theme_UT() + theme(axis.text.x=element_text(angle = -45)) +
+#   labs(x="", y="", title="Dog Adoptions, By Age & Location")
+# ggplotly(fig.03.Dog)
+```
+
+*The color/fill for each tile is scaled relative the `row` (i.e. location)*
+
+## 3.2 Cats
+```{r Fig03-2, fig.width=8, fig.height=8}
+Cats %>%
+  filter(SubType!="Unknown", SubType!="Special Event", SubType!="Tomlinson") %>%
+  plot_ly(type="histogram2d", x=Age.Group, y=SubType, colorscale="YlGnBu") %>%
+  layout(title="Dog Adoptions, By Age & Location", xaxis=list(title=""), yaxis=list(title=""),
+         titlefont = list(family = "Open Sans"))
+# 
+# fig.03.Cat <- Cats %>%
+#   group_by(Location=SubType, Age.Group) %>%
+#   summarise(Adoptions = n()) %>%
+#   filter(Location!="Unknown", Location!="Special Event", Location!="Tomlinson") %>%
+#   dcast(Location~Age.Group)
+# row.names(fig.03.Cat) <- fig.03.Cat$Location
+# fig.03.Cat$Location <- NULL
+# # Fig03[is.na(Fig03)] <- 0
+# d3heatmap::d3heatmap(fig.03.Cat, colors="YlGnBu", na.rm=T)
+```
+
+*The color/fill for each tile is scaled relative the `total` number of adoptions*
+
+# 4. Heatmap of Adoptions, By Age & Breed
+## 4.1 Dogs
+```{r Fig04-1A, fig.width=8, fig.height=8}
+df <- dcast(Dogs, Breed~Age.Group)
+row.names(df) <- df$Breed  
+df$Breed    <- NULL
+# d3heatmap::d3heatmap(df, scale="row", colors="YlOrRd", na.rm=T)
+# d3heatmap::d3heatmap(df, scale="column", colors="YlOrRd", na.rm=T)
+d3heatmap::d3heatmap(df, colors="YlOrRd", na.rm=T)
+rm(df)
+```
+
+*The color/fill for each tile is scaled relative the `total` number of adoptions*
+
+```{r Fig04-1B, fig.width=8, fig.height=8}
+df <- dcast(Dogs, Breed~Age.Group)
+row.names(df) <- df$Breed  
+df$Breed    <- NULL
+d3heatmap::d3heatmap(df, scale="row", colors="YlOrRd", na.rm=T)
+# d3heatmap::d3heatmap(df, scale="column", colors="YlOrRd", na.rm=T)
+# d3heatmap::d3heatmap(df, colors="YlOrRd", na.rm=T)
+rm(df)
+```
+
+*The color/fill for each tile is scaled relative the `row` (i.e. Breed)*
+
+## 4.2 Cats
+```{r Fig04-2A, fig.width=8, fig.height=8}
+df <- dcast(Cats, Breed~Colour)
+row.names(df) <- df$Breed  
+df$Breed    <- NULL
+# d3heatmap::d3heatmap(df, scale="row", colors="YlGnBu", na.rm=T)
+# d3heatmap::d3heatmap(df, scale="column", colors="YlGnBu", na.rm=T)
+d3heatmap::d3heatmap(df, colors="YlGnBu", na.rm=T)
+rm(df)
+```
+
+*The color/fill for each tile is scaled relative the `total` number of adoptions*
+
+```{r Fig04-2B, fig.width=8, fig.height=8}
+df <- dcast(Cats, Breed~Colour)
+row.names(df) <- df$Breed  
+df$Breed    <- NULL
+d3heatmap::d3heatmapOutput(d3heatmap::d3heatmap(df, scale="row", colors="YlGnBu", na.rm=T))
+# d3heatmap::d3heatmap(df, scale="column", colors="YlGnBu", na.rm=T)
+# d3heatmap::d3heatmap(df, colors="YlGnBu", na.rm=T)
+# d3heatmap::d3heatmap(df)
+rm(df)
+```
+
+*The color/fill for each tile is scaled relative the `row` (i.e. Breed)*
+
+# 5. By Day of Week
+## 5.1 Adoptions: By Species
+
+```{r Fig05-1}
+Outcomes %>%
+  group_by(DoW=wday(Date, label = T), Species, Age.Group) %>%
+  summarise(Adoptions = n()) %>%
+  ggplot(aes(x=DoW, y=Adoptions, fill=Species)) + 
+  geom_bar(stat="identity", position = "dodge") + 
+  scale_fill_fivethirtyeight() + 
+  theme_UT() + coord_polar() +
+  labs(x="", title="Adoptions by Day of The Week, By Species")
+```
+
+## 5.2 Adoptions: By Species, Age Group
+```{r Fig05-2}
+Outcomes %>%
+  group_by(DoW=wday(Date, label = T), Species, Age.Group) %>%
+  summarise(Adoptions = n()) %>%
+  ggplot(aes(x=DoW, y=Adoptions, fill=Age.Group)) + 
+  geom_bar(stat="identity", position = "stack") + 
+  scale_fill_brewer(type = "div", palette = 3) + 
+  facet_wrap("Species") + theme_UT() + coord_polar() +
+  labs(x="", title="Adoptions by Day of The Week, By Age Group & Species")
+```
+
+# 6. By Time of Day
+## 6.1 Adoptions: By Species
+```{r Fig06-1}
+Outcomes %>%
+  mutate(
+    Hour  = as.numeric(format(Date, format = "%I")), #%H
+    AM_PM = format(Date, format = "%p")) %>%
+  group_by(Hour, AM_PM, Species) %>%
+  summarise(Adoptions = n()) %>%
+  ggplot(aes(x=Hour, y=Adoptions, fill=Species, color=Species)) + 
+  geom_bar(stat="identity", position = "identity") + 
+  
+  scale_fill_brewer(type = "qual", palette = 3) + 
+  facet_grid(Species~AM_PM) + scale_x_continuous(breaks=c(1:12)) + 
+  theme_UT() + coord_polar(start = 0.25) +
+  labs(x="", title="Adoptions by Time of Day, By Species")
+```
+
+<br><br><br>
+
+***
+# Contact
+
+**Hunter Ratliff**
+
+Email: hunterratliff1@gmail.com   
+Twitter: @[HunterRatliff1](https://twitter.com/HunterRatliff1)   
+Github: [HunterRatliff1](https://github.com/hunterratliff1)   
+RPubs: [HunterRatliff1](rpubs.com/HunterRatliff1)   
+
+**Austin Pets Alive Contact Info**
+
+[Adopt](adopt@austinpetsalive.org)  |  [Donate](donate@austinpetsalive.org)  |   [Foster](mailto:foster@austinpetsalive.org)  |  [Volunteer](volunteer@austinpetsalive.org)
+
+
+[MY EMAIL](hunter.ratliff@austinpetsalive.org): Out of respect for the time of our staff/volunteers, please direct all data requests and more technical inquires to my email!
+
+
+
+
+```
+Copyright (C) 2015 Hunter Ratliff, Austin Pets Alive
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+```
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+
+Information About the R Session at the time it was compiled (for the purposes of [Reproducible Research](https://cran.r-project.org/web/views/ReproducibleResearch.html))
+
+```{r Session_info, echo=TRUE, collapse=TRUE}
+devtools::session_info()
+```

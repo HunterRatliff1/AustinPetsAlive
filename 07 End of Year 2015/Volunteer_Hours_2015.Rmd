@@ -1,7 +1,7 @@
 ---
 title: "Volunteer Hours in 2015"
 author: "Hunter Ratliff"
-date: "December 29, 2015"
+date: "December 31, 2015"
 output: 
   html_document:
     theme: united
@@ -36,14 +36,14 @@ source("~/Github/utexas/diveristy/theme_UT.R")
 xMatch <- function(p, x)    grepl(pattern=p,               x=x, ignore.case = T)
 ```
 ```{r Read | Hours}
-Hours <- readRDS("~/Github/Austin Pets Alive/07 End of Year 2015/Data/Hours.RDS")$value
-# Hours <- source("~/Github/Austin Pets Alive/07 End of Year 2015/R/Hours.R")
+Hours <- readRDS("~/Github/Austin Pets Alive/07 End of Year 2015/Data/Hours.RDS")
+# Hours <- source("~/Github/Austin Pets Alive/07 End of Year 2015/R/Hours.R")$value
 # # As factors
 # Hours$Location <- as.factor(Hours$Location)
 # Hours$Animal   <- as.factor(Hours$Animal) 
 # Hours$Type     <- as.factor(Hours$Type)
 # Hours$SubType  <- as.factor(Hours$SubType)
-# 
+# # 
 # saveRDS(object = Hours, file = "~/Github/Austin Pets Alive/07 End of Year 2015/Data/Hours.RDS")
 ```
 
@@ -52,8 +52,8 @@ Hours <- readRDS("~/Github/Austin Pets Alive/07 End of Year 2015/Data/Hours.RDS"
 * Among all volunteers, we had <b>`r sum(Hours$Duration) %>% round() %>% comma()` 
 volunteer hours</b> logged from `r min(Hours$Date.Vol) %>% format("%b %d %Y")` to 
 `r max(Hours$Date.Vol) %>% format("%b %d %Y")`
-* We invested <b>`r sum(Hours$Duration[Hours$isTraining]) %>% round() %>% comma()` 
-hours training</b> volunteers
+* We invested <b>`r sum(Hours$Duration[Hours$isTraining], na.rm=T) %>% round() %>% comma()` 
+hours</b> training `r n_distinct(Hours$User.ID[Hours$isTraining]) %>% comma()` new volunteers
 * <b>`r nrow(count(Hours, User.ID)) %>% comma()` unique volunteers</b> logged a total of
 <b>`r nrow(Hours) %>% comma()` entries</b>, with an average duration of 
 <b>`r mean(Hours$Duration) %>% round(2)` hours per entry</b>
@@ -61,7 +61,7 @@ hours training</b> volunteers
 The following figure summarises the total `hours` logged by the color, and labels 
 the `number of volunteers` who logged hours (in the white text box)
 
-```{r}
+```{r Overall}
 Hours %>%
   group_by(Type, Animal) %>%
   summarise(
@@ -73,11 +73,29 @@ ggplot(aes(x=Animal, y=Type, label=round(nVol))) +
   geom_label() + 
   scale_fill_continuous_tableau(labels=comma) +
   theme_UT() + theme(legend.position="right", legend.direction="vertical") +
-  labs(x="Animal Type", y="Activity Type")
+  labs(x="Species", y="Activity Type")
+citation.apa("At A Glance")
 # dcast(Hours, Animal~Type)
 ```
 
+```{r Both, eval=F}
+Hours %>%
+  filter(Animal=="Both") %>%
+  group_by(Type, SubType) %>% 
+  summarise(nHours = sum(Duration)) %>% group_by(Type) %>% 
+  top_n(10, wt=nHours) %>% mutate(Rank=min_rank(desc(nHours))) %>% 
+  select(-nHours) %>% dcast(Rank~Type, value.var="SubType") %>% 
+  # select(-Rank) %>%
+   kable()
+```
 
+```{r People, eval=F}
+group_by(Hours, Type, SubType, Animal) %>% 
+  summarise(nHours = sum(Duration)) %>% group_by(Type) %>% 
+  top_n(10, wt=nHours) %>% mutate(Rank=min_rank(desc(nHours))) %>% 
+  select(-nHours) %>% dcast(Animal+Rank~Type, value.var="SubType") %>% 
+  filter(Animal=="People") %>% kable()
+```
 
 # 1. Percentage of Total Hours
 
@@ -91,13 +109,14 @@ Hours %>%
   geom_bar(stat="identity", position = "stack", color="black") + 
   geom_bar(stat="identity", position = "stack", color="black") + 
   
-  scale_fill_brewer(palette = "Set1") +
+  scale_fill_brewer(name="Activity\nType", palette = "Set1") +
   guides(fill=guide_legend(nrow=3,byrow=TRUE)) +
-  coord_polar(theta = "y") + 
-  theme_UT() + labs(x="", y="", title="Percentage of Total Hours, By Activity Type")
+  coord_polar(theta = "y") + theme_UT() + theme(plot.background=element_rect(fill="white")) +
+  labs(x="", y="", title="Percentage of Total Hours, By Activity Type")
+citation.apa("Figure 1.1")
 ```
 
-## 1.2 Animal Type
+## 1.2 Species
 
 ```{r Fig01-B, fig.width=6, fig.height=7}
 Hours %>%
@@ -107,11 +126,16 @@ Hours %>%
   geom_bar(stat="identity", position = "stack", color="black") + 
   geom_bar(stat="identity", position = "stack", color="black") + 
   
-  scale_fill_brewer(palette = "Dark2") +
+  scale_fill_brewer(name="Species", palette = "Dark2") +
   guides(fill=guide_legend(nrow=2,byrow=TRUE)) +
-  coord_polar(theta = "y") + 
-  theme_UT() + labs(x="", y="", title="Percentage of Total Hours, By Animal Type")
+  coord_polar(theta = "y") + theme_UT() + theme(plot.background=element_rect(fill="white")) +
+  labs(x="", y="", title="Percentage of Total Hours, By Species")
+citation.apa("Figure 1.2")
 ```
+
+The species `people` refers to activites that support the people involved with 
+Austin Pets ALive (i.e. Volunteer Coordination, Greeters, Adoption Follow-Ups, 
+etc)
 
 ## 1.3 Location Volunteered
 
@@ -125,8 +149,9 @@ Hours %>%
   
   scale_fill_brewer(palette = "Paired") +
   guides(fill=guide_legend(nrow=2,byrow=TRUE)) +
-  coord_polar(theta = "y") + 
-  theme_UT() + labs(x="", y="", title="Percentage of Total Hours, By Location")
+  coord_polar(theta = "y") + theme_UT() + theme(plot.background=element_rect(fill="white")) +
+  labs(x="", y="", title="Percentage of Total Hours, By Location")
+citation.apa("Figure 1.3")
 ```
 
 
@@ -135,7 +160,7 @@ Hours %>%
 
 # 2. Activity Type Total Hours
 
-## 2.1 By Animal Type
+## 2.1 By Species
 
 ```{r Fig02-A, fig.width=6, fig.height=7}
 Hours %>%
@@ -151,9 +176,11 @@ Hours %>%
     HrPerVol  = round(sum.Hours/nVols, 2)) %>%
   ggplot(aes(x=Type, y=HrPerVol, fill=Animal, alpha=sum.Hours/1000)) + 
   geom_bar(width = 1, stat="identity", color="black") + 
-  scale_alpha_continuous(name="Total Hours For Activity\n(x1000)", range=c(0.5, 1)) +
-  theme_UT() + coord_polar() + 
-  labs(x="", y="Average Hours Per Volunteer", title="Activity Type Hours, By Animal Type")
+  scale_alpha_continuous(name="Total Hours For Activity\n(x1000)", range=c(0.2, 1)) +
+  scale_fill_brewer(name="Species", palette = "Dark2") +
+  coord_polar() + theme_UT() + theme(plot.background=element_rect(fill="white")) +
+  labs(x="", y="Average Hours Per Volunteer", title="Activity Type Hours, By Species")
+citation.apa("Figure 2.1")
 ```
 
 ## 2.2 By Month
@@ -174,10 +201,11 @@ Hours %>%
   ggplot(aes(x=Month, y=sum.Hours/1000, fill=Type)) + 
   geom_bar(width = 1, stat="identity", color="black") + 
   # scale_alpha_continuous(name="Hours Per Volunteer", range=c(0.4, 1)) +
-  scale_fill_brewer(palette = "Set1") +
+  scale_fill_brewer(name="Activity\nType", palette = "Set1") +
   guides(fill=guide_legend(nrow=3,byrow=TRUE)) +
-  theme_UT() + coord_polar() + 
+  coord_polar() + theme_UT() + theme(plot.background=element_rect(fill="white")) +
   labs(x="", y="Total Hours (x1000)", title="Activity Type Hours, By Month")
+citation.apa("Figure 2.2")
 ```
 
 
@@ -245,8 +273,9 @@ plotly::ggplotly()
 
 ```{r Hours Fig03-B, fig.width=6, fig.height=6}
 ggplot2::last_plot() + 
-  facet_wrap("Type", scales = "free_y") + 
+  facet_wrap("Type", scales = "free_y") + theme(axis.text.x=element_text(angle = -90)) +
   labs(title="Total Hours Over Time, By Type (Details)")
+citation.apa("Figure 4.2")
 ```
 
 ## 4.3 Number of Volunteers, By Activity Type
@@ -281,27 +310,7 @@ plotly::ggplotly()
 
 
 
-# Figure 04 - Bar Chart
-```{r Hours Fig04}
-Hours %>%
-  group_by(Type, Animal) %>% 
-  summarise(
-    nEntries  = n(),
-    nVols     = n_distinct(User.ID),
-    sum.Hours = sum(Duration),
-    avg.Hours = round(mean(Duration), 2),
-    med.Hours = round(median(Duration), 2),
-    sd.Hours  = round(sd(Duration), 2),
-    HrPerVol  = round(sum.Hours/nVols, 2)) %>% 
-  
-  ggplot(aes(x=Type, y=sum.Hours/1000, fill=Animal)) + 
-  geom_bar(stat="identity", color="black") +
-  
-  scale_fill_brewer(palette = "Dark2") + guides(fill=guide_legend(nrow=2,byrow=TRUE)) +
-  coord_flip() + theme_UT() + labs(x="Type of Activity", y="Total Hours (x1000)",
-                    title="Total Hours By Activity Type, By Animal")
-citation.apa("Figure 04")
-```
+
 
 
 
@@ -318,7 +327,7 @@ Hours %>%
   
   # Plot
   ggplot(aes(x=Date.Vol, y=cum.Hour, color=Type)) + 
-  geom_jitter(alpha=0.3) + geom_smooth() +
+  geom_jitter(alpha=0.3) +# geom_smooth() +
     ## scales
   scale_color_brewer(palette = "Set1") + guides(color=guide_legend(nrow=3,byrow=TRUE)) +
     ## theme
@@ -329,7 +338,7 @@ Hours %>%
 plotly::ggplotly()
 ```
 
-## 5.2 By Animal Type
+## 5.2 By Species
 
 ```{r Hours Fig05-B, include=FALSE}
 Hours %>%
@@ -338,7 +347,7 @@ Hours %>%
   
   # Plot
   ggplot(aes(x=Date.Vol, y=cum.Hour, color=Animal)) + 
-  geom_jitter(alpha=0.3) + geom_smooth() +
+  geom_jitter(alpha=0.3) + #geom_smooth() +
     ## scales
   scale_color_brewer(palette = "Dark2") + guides(color=guide_legend(nrow=2,byrow=TRUE)) +
     ## theme
@@ -358,7 +367,7 @@ Hours %>%
   
   # Plot
   ggplot(aes(x=Date.Vol, y=cum.Hour, color=Location)) + 
-  geom_jitter(alpha=0.3) + geom_smooth() +
+  geom_jitter(alpha=0.3) + #geom_smooth() +
     ## scales
   scale_color_brewer(palette = "Paired") + guides(color=guide_legend(nrow=2,byrow=TRUE)) +
     ## theme
@@ -371,31 +380,25 @@ citation.apa("Figure 05[D]")
 plotly::ggplotly()
 ``` 
  
-# Figure 06 - Density Graph
-```{r Hours Fig06}
+# 6. Hours by Species and Activity Type
+```{r Hours Fig04}
 Hours %>%
-  group_by(User.ID, Type, Animal, Location) %>%
+  group_by(Type, Animal) %>% 
   summarise(
-    Hours    = sum(Duration),
-    nEntries = n()
-  ) %>% ungroup() %>%
-  filter(#Hours>median(Hours), 
-         Location!="Events",
-         Location!="Offsite"
-         ) %>%
-  mutate(Rank = min_rank(desc(Hours))) %>%
-  # summary()
-
-  # Plot
-  ggplot(aes(x=Rank, fill=Type)) + 
-  facet_grid(Animal~Location, scales = "free") +
-  geom_density(alpha=0.5) +
-    ## scales
-  scale_fill_brewer(palette = "Dark2") + guides(fill=guide_legend(nrow=2,byrow=TRUE)) +
-  scale_x_sqrt() +
-    ## theme
-  # facet_grid(Location~Animal, scales = "free") +
-  theme_UT() + labs(x="Time") 
+    nEntries  = n(),
+    nVols     = n_distinct(User.ID),
+    sum.Hours = sum(Duration),
+    avg.Hours = round(mean(Duration), 2),
+    med.Hours = round(median(Duration), 2),
+    sd.Hours  = round(sd(Duration), 2),
+    HrPerVol  = round(sum.Hours/nVols, 2)) %>% 
+  
+  ggplot(aes(x=Type, y=sum.Hours/1000, fill=Animal)) + 
+  geom_bar(stat="identity", color="black") +
+  
+  scale_fill_brewer(name="Species", palette = "Dark2") + guides(fill=guide_legend(nrow=2,byrow=TRUE)) +
+  coord_flip() + theme_UT() + labs(x="Type of Activity", y="Total Hours (x1000)",
+                    title="Total Hours By Activity Type, By Species")
 citation.apa("Figure 06")
 ```
 
@@ -536,12 +539,17 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 ```
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+This is an R Markdown document. Markdown is a simple formatting syntax 
+for authoring HTML, PDF, and MS Word documents. For more details on using 
+R Markdown see <http://rmarkdown.rstudio.com>.
 
-Information About the R Session at the time it was compiled (for the purposes of [Reproducible Research](https://cran.r-project.org/web/views/ReproducibleResearch.html))
+Information About the R Session at the time it was compiled 
+(for the purposes of [Reproducible Research](https://cran.r-project.org/web/views/ReproducibleResearch.html))
 
 ```{r Session_info, echo=TRUE, collapse=TRUE}
 devtools::session_info()
 ```
 
-Source Code on [Github]()
+Source Code under my 
+[Austin Pets Alive repo](https://github.com/HunterRatliff1/AustinPetsAlive) 
+on Github

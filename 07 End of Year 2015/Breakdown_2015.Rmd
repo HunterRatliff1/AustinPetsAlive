@@ -1,0 +1,244 @@
+---
+title: "End of Year Breakdown"
+author: "Hunter Ratliff"
+date: "December 16, 2015"
+output: 
+  html_document:
+    theme: united
+    toc: true
+---    
+
+<!-- Functions, Globals, ... --> 
+
+```{r global_options, include=FALSE}
+## Sets output for figures
+knitr::opts_chunk$set(fig.width=8, fig.height=8, fig.path='Figures/',
+                      echo=F, warning=FALSE, message=FALSE, fig.align='center')
+
+## Required packages
+packs.wrangle <- c("googlesheets", "dplyr", "reshape2", "tidyr", "lubridate", "stringi")
+packs.display <- c("ggplot2", "ggthemes", "scales", "RColorBrewer", "gridExtra", "xtable")
+sapply(c(packs.wrangle, packs.display, "devtools", "knitr"), require, character.only=TRUE)  
+         
+## Citation functions
+source("~/Github/Citations/Citation Function.R")
+rm(citation.date, citation.htr)
+
+## Theme function
+source("/Users/main/Github/Austin Pets Alive/Scripts/theme_APA.R")
+
+# Authorize with Google Drive
+(my_sheets <- gs_ls())
+rm(my_sheets)
+
+### contributing source:
+# https://rstudio-pubs-static.s3.amazonaws.com/31867_8236987cf0a8444e962ccd2aec46d9c3.html
+```
+
+
+```{r Vol_Hours}
+Vol_Hours <- gs_title("VolunteerHours2015") %>% gs_read_csv() %>%
+  select(-Category.ID, -Activity.ID) 
+
+ref <- gs_title("VolunteerHours2015") %>% gs_read_csv() %>% select(Category, Activity, Category.ID) %>% unique()
+ref$branch <- sapply(ref$Category, function(x) {
+    if(grepl("Dog", x)  |  grepl("Parvo", x)  |  grepl("Rufftail", x)) return("Dog")
+    if(grepl("Cat", x)  |  grepl("Neonatal", x)) return("Cat")
+    return("Support")
+})
+ref$RefNum <- c(1:nrow(ref))
+  
+# Parse Dates
+Vol_Hours$Date  <- mdy_hms(Vol_Hours$Date) %>% floor_date(unit = "day")
+Vol_Hours$Start <- hm(Vol_Hours$Start)
+Vol_Hours$End   <- hm(Vol_Hours$End)
+Vol_Hours$Timeclocked <- ifelse(!is.na(Vol_Hours$Start) & !is.na(Vol_Hours$End), TRUE, FALSE)
+
+## Seperate into types
+Vol_Hours$Type <- sapply(Vol_Hours$Category, function(x) {
+    if(grepl("Dog", x)  |  grepl("Parvo", x)  |  grepl("Rufftail", x)) return("Dog")
+    if(grepl("Cat", x)  |  grepl("Neonatal", x)) return("Cat")
+    return("Support")
+})
+
+## Make category factors
+Vol_Hours$Category <- sapply(Vol_Hours$Category, function(x) {
+  x <- gsub("Dog Program - ", "", x)
+  x <- gsub("Cat Program - ", "", x)
+  x <- gsub("Behind the Scenes", "BTS", x)
+  x <- gsub("Volunteer Coordination", "VC", x)
+  x <- gsub("Existing Volunteers \\(Already Attended Orientation\\)", "ExistingVols", x)
+  x <- gsub("Events/PET Squad", "Events", x)
+  x <- gsub("General, Administrative & Facilities", "Admin", x)
+  x <- gsub("Community Service Restitution", "CSR", x)
+  x <- gsub("Specialty - Neonatal \\(BB\\)", "BB", x)
+  x <- gsub("Greeters - TLAC", "Greeters", x)
+  x <- gsub("New Volunteers", "NewVols", x)
+  x <- gsub("Offsite Catteries", "Offsite", x )
+  x <- gsub("Medical Clinic", "Clinic", x)
+  x <- gsub("American Pets Alive!", "AmPA", x)
+  x <- gsub("Virtual Foster", "VirtualFoster", x)
+  x <- gsub("Volunteer Social Events", "Social", x)
+  x <- gsub("Marketing - General", "Marketing", x)
+  x <- gsub("Merchandise",  "Marketing", x)
+  x <- gsub("Specialty - Parvo ICU", "Parvo", x)
+  x <- gsub("Rufftail Runners", "RTR", x)
+  x <- gsub("Big Brother/Big Sister", "BBBS", x)
+  x <- gsub("Offsite Adoptions", "Offsite", x)
+  return(x)
+})
+# Make factor
+Vol_Hours$Category <- factor(Vol_Hours$Category)
+```
+
+```{r Dog_Hours}
+## Build data.frame for dog hours
+Dog_Hours <- Vol_Hours %>%
+  filter(Type=="Dog")
+
+# Resets factor
+Dog_Hours$Category <- as.factor(as.character(Dog_Hours$Category))
+```
+
+```{r Fig01 Dog Related Hours 2015, fig.width=10.5, fig.height=6.5}
+P1 <- Dog_Hours %>% 
+  mutate(Date = as.Date(Date)) %>%
+  group_by(Date) %>%
+  summarise(UniqueVols     = n_distinct(User),
+            UniqueActivity = n_distinct(Activity),
+            Hours.Sum      = sum(Hours),
+            Hours.med      = median(Hours)) %>%
+  ungroup() %>%
+  mutate(DayOfWeek = wday(Date, label = T)) %>%
+  # melt(id.vars = c("Date", "Hours.Sum"), measure.vars = c("UniqueVols", "UniqueActivity")) %>%
+  ggplot(aes(x=Date, color=DayOfWeek)) + 
+  geom_smooth(aes(y=Hours.Sum, fill=DayOfWeek), alpha=0.2) + 
+  geom_smooth(aes(y=Hours.Sum), color="black", alpha=.1, size=2) + 
+  geom_jitter(aes(y=Hours.Sum, size=UniqueVols), alpha=0.5) + 
+  theme_APA() + scale_x_date(breaks = "2 months", minor_breaks = "1 month", labels = date_format("%b")) +
+  scale_color_brewer(name="", palette = "Accent") + 
+  scale_fill_brewer(name="", palette = "Accent") + 
+  labs(x="", y="Daily Hours Logged", 
+       title="Total Dog-Related Hours Logged in 2015, by Day of the Week")
+
+# Plot figure
+grid.arrange(P1, 
+             P1 + facet_wrap("DayOfWeek", nrow=1) + theme(axis.text.x=element_text(angle = 90)) +
+               labs(x="Date", y="", title="") + guides(fill=F, size=F, color=F, alpha=F),
+             heights=c(150,75)) 
+citation.apa("Figure 01")
+```
+
+```{r Fig02 CrossSection-Monthly-CategoryHours-Total-and-AvgPerVol, fig.width=16, fig.height=9}
+Dog_Hours %>% 
+  group_by(Category, Month=month(Date, label = T)) %>%
+  summarise(
+    Number.Entries = n(), 
+    Unique.Vols    = n_distinct(User),
+    Hours.Total    = round(sum(Hours), 0),
+    Hours.Per.Vol  = round(Hours.Total/Unique.Vols, 2)) %>% ungroup() %>% 
+  filter(Category!="Enrichment") %>%
+  ## ggplot object
+  ggplot(aes(x=Category, y=Month, group=Category, 
+             label=paste0(Hours.Total, " Hours\n", Unique.Vols, " Vols"))) + 
+  # Geoms
+  geom_tile(aes(group=Category, fill=Hours.Per.Vol)) +
+  geom_text(aes(color=Hours.Total, size=sqrt(Hours.Per.Vol)), fontface="bold", family="Verdana") + 
+  # Scales
+  scale_color_continuous(low="#298A08", high="#DF0101", 
+                         name="Text Color:  Category's Total Monthly Hours") + 
+  scale_fill_continuous(low="#F3F781", high="#58ACFA", 
+                        name="Block Fill:  Average Hours Per Volunteer") + 
+  # Theme
+  labs(title="Cross Sectional Breakdown: Monthly Hours By Category\n(Total Hours and Average Per Volunteer)") + theme_APA() + guides(size=F)
+citation.apa("Figure 02")
+```
+
+```{r Fig03A-Weekly-Hours-ByUser-ColorCategories, fig.width=16, fig.height=12}
+Dog_Hours %>% group_by(User, Week=week(Date)) %>%
+  summarise(
+    Hours  = sum(Hours),
+    Logins = n_distinct(Date),
+    Ctgrys = n_distinct(Category)) %>% ungroup() %>%
+  group_by(User) %>% 
+  mutate(
+    nLogin = sum(Logins),
+    nWeeks = n_distinct(Week)) %>% ungroup() %>% 
+  filter(ntile(nWeeks, 100)>60) %>% 
+  filter(ntile(nLogin, 100)>50) %>% 
+  ggplot(aes(x=User, y=Week, fill=factor(Ctgrys))) + 
+  geom_tile(aes(alpha=Logins)) + 
+  geom_text(aes(label=round(Hours, 0))) +
+  scale_alpha_continuous(name="Weekly Logins", range = c(0.5,1)) +
+  scale_fill_brewer(name="Weekly Categories Logged", palette = "Spectral") + 
+  coord_flip() + theme_APA() + labs(title="Weekly Hours Logged By User\nColored by Number of Activity Categories For The Week")
+citation.apa("Figure 03A")
+```
+
+```{r Fig03B-Weekly-Hours-ByUser-ColorLogins, fig.width=16, fig.height=12}
+ Dog_Hours %>% group_by(User, Week=week(Date)) %>%
+  summarise(
+    Hours  = sum(Hours),
+    Logins = n_distinct(Date),
+    Ctgrys = n_distinct(Category)) %>% ungroup() %>%
+  group_by(User) %>% 
+  mutate(
+    nLogin = sum(Logins),
+    nWeeks = n_distinct(Week)) %>% ungroup() %>% 
+  filter(ntile(nWeeks, 100)>60) %>% 
+  filter(ntile(nLogin, 100)>50) %>% 
+  ggplot(aes(x=User, y=Week, fill=factor(Logins))) + 
+  geom_tile(aes(alpha=Ctgrys)) + 
+  geom_text(aes(label=round(Hours, 0))) +
+  scale_alpha_continuous(name="Weekly Categories Logged", range = c(0.6,1)) +
+  scale_fill_brewer(name="Weekly Logins", palette = "Spectral") + 
+  coord_flip() + theme_APA() + labs(title="Weekly Hours Logged By User\nColored by Logins Per Week")
+ citation.apa("Figure 03B")
+```
+
+```{r, eval=F}
+Dog_Hours %>% group_by(Category, month(Date, label = T)) %>%
+  summarise(
+    Number.Entries = n(), 
+    Unique.Vols    = n_distinct(User),
+    Unique.Dates   = n_distinct(Date),
+    Hours.Total    = round(sum(Hours), 0),
+    Hours.Median   = round(median(Hours), 2),
+    Hours.Per.Vol  = round(Hours.Total/Unique.Vols, 2)) %>%
+  melt(id.vars = "Category") %>%
+  ggplot(aes(x=Category, y=variable, group=Category, label=value)) + 
+  geom_tile(aes(group=variable, fill=value)) +
+  geom_text(color="yellow")
+```
+
+
+
+<br><br><br>
+<hr>
+# Contact
+<hr>
+**Hunter Ratliff**
+
+Email: hunterratliff1@gmail.com   
+Twitter: @[HunterRatliff1](https://twitter.com/HunterRatliff1)   
+
+```
+Copyright (C) 2015 Hunter Ratliff
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+```
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
