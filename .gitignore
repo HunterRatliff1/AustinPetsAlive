@@ -45,4 +45,4 @@ rsconnect/
 *.png
 
 # icons
-/Icon
+*/Icon
