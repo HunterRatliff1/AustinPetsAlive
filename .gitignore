@@ -40,3 +40,9 @@ rsconnect/
 
 # HTML
 *.html
+
+# png
+*.png
+
+# icons
+/Icon
