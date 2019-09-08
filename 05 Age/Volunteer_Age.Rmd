@@ -1,5 +1,5 @@
 ---
-title: "Volunteer Age & Engagement"
+title: "Volunteer Age, Employer & Engagement"
 author: "Hunter Ratliff"
 date: "November 19, 2015"
 output: 
@@ -11,26 +11,193 @@ output:
 
 ```{r global_options, include=FALSE}
 require(knitr)
-# opts_knit$set(root.dir = "..")
+## Define global settings for chunk output
+knitr::opts_chunk$set(fig.width=12, fig.height=10, fig.align='center',      
+                      fig.path='Figures/',                             # Sets output for figures
+                      echo=FALSE, warning=FALSE, message=FALSE)        # Silences most chunk outputs
 
-## Sets output for figures
-knitr::opts_chunk$set(fig.width=12, fig.height=10, fig.path='Figures/',
-                      echo=FALSE, warning=FALSE, message=FALSE, fig.align='center')
-```
-```{r LOAD | Packs}
-sapply(c("magrittr", "dplyr", "reshape2", "ggplot2", "lubridate", "stringr", "ggthemes",
-         "scales", "gridExtra"), require, character.only=TRUE)  
+## Load required packages
+# Make a vector of the names of packages we plan to use
+packs <- c("magrittr", "dplyr", "reshape2", "ggplot2", "lubridate", 
+           "stringr", "ggthemes", "scales", "gridExtra", "googlesheets")
 
+# Apply the require fxn to each package in list
+sapply(packs, require, character.only=TRUE)
+
+## The 'source' function runs the R script of the provided path 
+# See code:         https://github.com/HunterRatliff1/Citations
 source("~/Github/Citations/Citation Function.R")
-```
-```{r Read | Profiles}
-# Set working directory
-setwd("~/Github/Austin Pets Alive/05 Age")
+rm(citation.htr, citation.date)
 
-# Import profile export
-Profiles <- read.csv("Data/ProfileExport_2015-11-19.csv", na.strings = "")
+## Theme object for ggplots
+source("~/Github/utexas/diveristy/theme_UT.R")
+
+## Link to this file on Github
+git_link <- "https://github.com/HunterRatliff1/AustinPetsAlive/blob/master/05%20Age/Volunteer_Age.Rmd"
 ```
-```{r Build | Qualification}
+
+```{r Read | Profiles}
+## Save the original names of the columns, to be included in the report
+Col_Names <- gs_title("Age & Employeer") %>% 
+  gs_read_csv("2015-12-22") %>% names()
+
+# ## Save a data.frame containing volunteer names & IDs (for your own referance)
+# Profiles.Vols <- gs_title("Age & Employeer") %>% 
+#   gs_read_csv("2015-12-22") %>% select(
+#   First       = FirstName,
+#   Last        = LastName,
+#   User.ID     = DatabaseUserId, 
+#   User.Name   = Username)
+
+Profiles <- gs_title("Age & Employeer") %>% 
+  gs_read_csv("2015-12-22") %>%
+  select(-FirstName, -LastName, -Username) %>%
+  rename(   ## Rename column names to be more human readable
+    User.ID     = DatabaseUserId,    # ID variables
+    Hours       = HoursWorked,       # Hours volunteered
+    
+    # Qualification variables
+    isAdmin     = AdministratorStatus,
+    isActive    = VolunteerStatus,
+    Staff       = Q...APA..Staff,
+    
+    # Birthday and employer
+    Birthday1   = Birthday,
+    Birthday2   = CF...General.Information...Date.of.Birth,
+    Employer    = CF...General.Information...Employer,
+    
+    # Time variables
+    Orientation = Q...General...Orientation,
+    RTR_Date    = CF...Training.Questions...RuffTail.Runner.Training.Date,
+    Joined      = DateJoined, 
+    Login       = LastLoginDate) %>%
+  
+  mutate( ## Format some varables
+    
+    # Format the dates as such, dropping the hours and minutes
+    Birthday1 = floor_date(mdy_hms(Birthday1), unit = "day"),
+    Birthday2 = floor_date(mdy_hms(Birthday2), unit = "day"),
+    Login     = floor_date(mdy_hms(Login),     unit = "day"),
+    Joined    = floor_date(mdy_hms(Joined),    unit = "day"),
+    RTR_Date  = floor_date(mdy_hms(RTR_Date),  unit = "day"),
+    
+    # Round the hours to 0 digits
+    Hours     = round(Hours),
+    Started   = ifelse(Hours>0, 1, 0),
+    Has.Hours = ifelse(Hours>0, "Has Hours", "Hasn't Started"))
+
+
+
+
+
+
+## Function that selects birthday 
+# (since the two birthday options are inconsistantly filled out)  
+Profiles$Birthday <- mapply(function(A, B) {
+  if( is.na(A) &  is.na(B)) return(NA)
+  if(!is.na(A) &  is.na(B)) return(A)
+  if( is.na(A) & !is.na(B)) return(B)
+  if(!is.na(A) & !is.na(B)) {
+    if(A==B) return(A)
+    A.yr <- as.numeric(ymd(A) %--% today(), unit="year")
+    B.yr <- as.numeric(ymd(B) %--% today(), unit="year")
+    if(A.yr >= 12  &  A.yr <= 90) return(A)
+    if(B.yr >= 12  &  B.yr <= 90) return(B)
+    else(return(NA))
+  }
+}, as.character(Profiles$Birthday1), as.character(Profiles$Birthday2), SIMPLIFY = T)
+# reparse the birthday variable as a date
+Profiles$Birthday <- ymd(Profiles$Birthday)
+
+
+
+
+
+## Make factors
+Profiles$isAdmin  <- as.factor(Profiles$isAdmin)
+Profiles$isActive <- as.factor(Profiles$isActive)
+
+
+## Finally, create the refined Profiles data.frame
+Profiles <- Profiles %>% 
+  # Select our refined columns
+  select(Birthday, User.ID, Joined, Login, isAdmin, isActive, Staff, Hours, Employer, Started) %>%
+  
+  # Filter out staff, then drop that variable
+  filter(is.na(Staff)) %>% select(-Staff) %>%
+  
+  # Filter Birthdays to make things reasonable
+  mutate(Age = as.numeric(Birthday %--% today(), unit="year"))
+
+
+## Remove erronious ages & round to nearest year
+Profiles$Age[Profiles$Age<12] <- NA
+Profiles$Age[Profiles$Age>85] <- NA
+Profiles$Age <- round(Profiles$Age)
+```
+```{r Parse the list of Employeers}
+getEmployers <- source("~/Github/Austin Pets Alive/07 End of Year 2015/R/getEmployers.R")$value
+
+Profiles <- left_join(
+  select(Profiles, -Employer),
+  getEmployers(Profiles$User.ID, Profiles$Employer))
+```
+```{r TopEmployers}
+TopEmployers <- Profiles %>% 
+  mutate(Started = ifelse(Hours>0, "Started", "Did not start")) %>%
+  
+  group_by(Employer, Started) %>%
+  filter(!is.na(Employer)) %>%
+  summarise(Count=n(), Hours=sum(Hours)) %>% ungroup() %>% 
+  arrange(desc(Hours)) %>% tbl_df()
+```  
+```{r ByAgeGroup}
+## Define the age groups
+Profiles$Age.Group <- sapply(Profiles$Age, function(x) {
+  if(is.na(x))     return(NA)
+  if(x>=12 & x<18) return("Minor")
+  if(x>=18 & x<23) return("College")
+  if(x>=23 & x<30) return("Adult-Younger")
+  if(x>=30 & x<50) return("Adult")
+  if(x>=50 & x<65) return("Adult-Older")
+  if(x>=65) return("Senior")
+  return("Other")
+})
+
+# Make ordered factor
+Profiles$Age.Group <- factor(Profiles$Age.Group, 
+                             levels=c("Minor", "College", "Adult-Younger", 
+                                      "Adult", "Adult-Older", "Senior"), ordered=T)
+
+AgeGroup <- Profiles %>% 
+  filter(year(Joined)==2015) %>%
+  mutate(
+    Has.Hours = ifelse(Hours>HOUR_CUTOFF, T, F),
+    Joined    = month(Joined, label = T)) %>%
+  group_by(Joined, Age.Group) %>% 
+  summarise(
+    nVols     = n(), 
+    nStart    = sum(Has.Hours), 
+    pStart    = round(sum(Has.Hours)/n(), 3), 
+    Hours.Avg = round(mean(Hours), 1), 
+    Hours.Med = median(Hours), 
+    Hours.SD  = round(sd(Hours), 1)) %>%
+  arrange(desc(pStart)) %>% ungroup()
+```
+```{r Control | Globals}
+## Use this to adjust the vector designating a volunteer as
+## engaged (1) or never started (0)
+# Vols$Has.Hours         <- ifelse(Vols$Hours>2, 1, 0) 
+HOUR_CUTOFF <- 2
+
+## Use this to set the smallest group size allowed in order
+## to be considered an 'Employer'
+NUM_OF_VOLS_WITH_HOURS <- 3
+
+```
+
+
+```{r Build | Qualification, eval=F}
 Quals <- select(Profiles, DatabaseUserId, starts_with("Q")) %>%
   melt(id.vars = "DatabaseUserId", na.rm = T,
        variable.name = "type", value.name = "status")
@@ -38,7 +205,7 @@ Quals <- select(Profiles, DatabaseUserId, starts_with("Q")) %>%
 Quals$type <- gsub(pattern = "Q...", replacement = "", Quals$type)
 Quals$type <- factor(Quals$type)
 ```
-```{r Build | Time}
+```{r Build | Time, eval=F}
 Time <- Profiles %>%
   mutate(
     Birthday1   = as.Date(mdy_hms(Birthday)),
@@ -71,18 +238,32 @@ Time$Age[Time$Age>90] <- NA
 Time <- mutate(Time, JoinToLogin.wk = as.duration(interval(Joined, Login)) %/% edays(7)) 
 
 ```
-```{r Build | Vols1}
-Vols <- Profiles %>% 
-  mutate(Name = paste(trimws(FirstName), trimws(LastName))) %>%
-  select(DatabaseUserId, Name, HoursWorked, VolunteerStatus, Employer=CF...General.Information...Employer)
+```{r Build | Vols1, eval=F}
+# Vols <- Profiles %>% 
+  # mutate(Name = paste(trimws(FirstName), trimws(LastName))) %>%
+  # select(DatabaseUserId, Name, HoursWorked, VolunteerStatus, Employer=CF...General.Information...Employer)
 
-Vols$HoursWorked <- round(Vols$HoursWorked, 2)
+# Vols$HoursWorked <- round(Vols$HoursWorked, 2)
 
-Vols$Employer2 <- Vols$Employer
+# Vols$Employer2 <- Vols$Employer
+
+Employers <- Profiles$Employer %>% unique()
+
+Profiles$Student <- grepl("student", Profiles$Employer)
+
+subset(Employers, grepl("student", Employers) & grepl("UT", Employers))
 # Teacher
 # Studnet
 # Self
 # Retired
+
+
+
+
+
+
+
+
 
 Vols$Employer[grepl("Austin pets alive", 
                     Vols$Employer, ignore.case = T)]                <- "APA"
@@ -175,7 +356,7 @@ Vols$Employer[Vols$Employer=="7.11"]        <- "HEB"
 Vols$Employer <- trimws(Vols$Employer)
 Vols$Employer <- factor(Vols$Employer)
 ```
-```{r Build | Vols2}
+```{r Build | Vols2, eval=F}
 
 Vols <- filter(Vols, Employer != "APA")                              # Don't work for APA
 Vols <- anti_join(Vols, filter(Quals, type=="APA..Staff"))           # Not staff
@@ -204,7 +385,7 @@ Vols$Age.Group[grepl("Adult Only", Vols$Age.Group)]                  <- "18+"
 
 Vols$Age.Group <- as.factor(Vols$Age.Group)
 ```
-```{r Build | Theme object}
+```{r Build | Theme object, eval=F}
 APA.theme = theme_fivethirtyeight() + theme(
   axis.title = element_text(family="Verdana", color = "#DD5928", face = "bold"),
   plot.title = element_text(hjust = 0, size = rel(1.5), face = "bold", family="American Typewriter", color = "#DD5928"),
@@ -212,74 +393,520 @@ APA.theme = theme_fivethirtyeight() + theme(
   strip.text = element_text(family="Verdana", color = "#5BC002", face = "bold")
 )
 ```
-```{r Control | Globals, echo=TRUE}
-## Use this to adjust the vector designating a volunteer as
-## engaged (1) or never started (0)
-# Vols$Has.Hours         <- ifelse(Vols$Hours>2, 1, 0) 
-HOUR_CUTOFF <- 2
 
-## Use this to set the smallest group size allowed in order
-## to be considered an 'Employer'
-NUM_OF_VOLS_WITH_HOURS <- 3
-
-```
 
 # Purpose & Summary of Findings
 
 ### Purpose
 
-The aim of this analysis was to explore age and employer in relation to volunteer engagement. 
+The aim of this analysis was to explore age and employer in relation to 
+volunteer engagement. 
 
-I had done some readings about strategic volunteer implementation a while back, and I wanted to do some exploration in hopes of finding a predictive model (of some sort) to describe our volunteer's involvement with Austin Pets Alive. 
+I had done some research about 
+[strategic volunteer implementation](https://drive.google.com/file/d/0BywdqWFJ7KdzMWNmaHJobW81UnM/view?usp=sharing) 
+a while back, and I wanted to do some exploration in hopes of finding a 
+predictive model (of some sort) to describe our volunteer's involvement with 
+[Austin Pets Alive](http://www.austinpetsalive.org/get-involved/volunteer/). 
 
-I've done a great deal of 'playing around' with our volunteer database in hopes of explaining why we have such a low rate of initial volunteer involvement immediately following orientation. This is typical for many non-profits, but it creates quite the burden on the Volunteer Coordination Team if we desire to identify which volunteers to invest our limited resources on (like training or mentor sessions).
+I've done a great deal of 
+[exploratory data analysis](http://had.co.nz/thesis/) with our volunteer 
+database in hopes of explaining why we have such a low rate of initial 
+volunteer involvement immediately following orientation. This is typical 
+for many non-profits, but it creates quite the burden on the Volunteer 
+Coordination Team if we desire to identify which volunteers to invest our 
+limited resources on (like training or mentor sessions).
 
-I have intuitively noticed a few suspected generalities (a predominately part-time volunteer base, a poor retention rate of college students, etc.), but I had yet to explicitly investigate the relationship between age, employer, and likelihood of volunteering one or more times after volunteer orientation.
+I have intuitively noticed a few suspected generalities (a predominately 
+part-time volunteer base, a poor retention rate of college students despite 
+a massive interest, etc.), but I had yet to explicitly investigate the 
+relationship between age, employer, and likelihood of volunteering one 
+or more times after volunteer orientation.
 
 ### Summary of Findings
 
-As usual, there are no conclusive explanatory predictors for volunteer engagement (on the basis of age or employee alone). However, I did find two reoccurring motifs in our volunteer engagement
+As should be expected, there are no conclusive explanatory predictors 
+for volunteer engagement (on the basis of age or employee alone). 
+However, I did find two reoccurring motifs in our volunteer engagement:
 
-1. A whole lot of folks in their 20s come to orientation, quite a few never come back, and even fewer are highly engaged (500+ hours).
-2. Most of the *older* folks I know at APA seem to be highly involved. These visualizations seem to support that observation, and furthermore indicate in particular that volunteers who are retired have an impressive retention rate. These volunteers apparently are some of our most active contributes, which is in agreement with most of the research I've read about strategic volunteer engagement.
+1. A whole lot of folks in their 20s come to orientation, quite a few 
+never come back, and even fewer are highly engaged (500+ hours).
+2. Most of the *older* folks I know at APA seem to be highly involved. 
+These visualizations seem to support that observation, and furthermore indicate 
+in particular that volunteers who are retired have an impressive retention rate. 
+These volunteers apparently are some of our most active contributes, which is in 
+agreement with most of the research I've read about volunteer engagement.
 
-# Looking at Volunteers by Their Employers
+# Technical Summary of This Report
+
+This section of the report explains the technical and statistical techniques that
+I used when compiling my findings. In the spirit of replication and reproducibility,
+the aim here is to document my methodology and provide a guide for future data 
+scientists. 
+
+## Replicating This Report
+
+In this section I include some info about how the report was built, in case 
+someone reading this (including myself in months or years) wants to replicate 
+this report. Out of respect for our volunteers, I'm not including the full data
+set. However, those with access to the *APA Google Drive* may find the dataset
+under the spreadsheet titled "Age & Employer" in my Reports folder. 
+
+In the event that [BetterImpact](http://www.betterimpact.com/) creates a RESTful
+API in the future, I used the `Volunteer Profile Export` to select all volunteers
+with a status that was NOT `Applicant` or `In Process`. Essentially, this grabs the
+records of all of our volunteers (active or not) who have attended orientation plus
+the folks who have been with us from the early days.
+
+From the Volunteer Profile Export, I selected the following columns:
+
+```{r Print the columns that were selected, echo=T, collapse=T}
+# Print columns selected
+print(Col_Names)
+
+# Remove object from enviroment
+rm(Col_Names)
+```
+
+The entire report was compiled in RStudio (an open source statistical software used by
+the likes of *NASA, Bayer, and Facebook*, to name a select few). The source code is all
+contained within a `.rmd` file hosted on my Github account at the following URL:
+`r git_link`
+
+
+
+
+
+
+
+# What Employers Have The Most Employees Involved?
+
+The begin, let's take a look at volunteer engagement by employer. To do this, I took
+a list of the largest employers in the Austin area, and matched the employer's name
+to the `Employeer` field in Vol2 (source: 
+[Austin Chamber](https://www.austinchamber.com/site-selection/greater-austin-profile/employers.php)
+). Matches were preformed using both full and partial matches, so folks who listed 
+`Time Warner Cable`, `Time Warner`, and `TWC` would all be caught by the match process.
+
+## What Is The Overall Engagement & Retention Rate of Each Employeer?
+
+To answer this question, I plotted the `total number of volunteers` on the x-axis, and the 
+`number of volunteers who started` (i.e. logged more than 0 hours) on the y-axis. Overall, 
+employers had an engagement rate of about 50% (meaning half of those who attend 
+orientation will start), which is represented by the blue line. Each point is colored by the
+total number of hours for all employees, and each point is scaled (roughly) to the relative 
+size of the employer. 
+
+```{r Fig_01A}
+Chamb.sum %>%
+#   ggplot(aes(x=Start, y=Hours)) + geom_jitter(aes(color=Start/Vols)) + 
+#   xlim(c(0,40)) + ylim(c(0,3000)) + scale_color_continuous_tableau()
+  ggplot(aes(x=Vols, y=Start)) +
+  geom_jitter(aes(size=Size, color=Hours/100)) + 
+  # geom_label(data=filter(Chamb.sum, Size=="Under 1k"), aes(label=Key), nudge_x = 50) +
+  geom_label(data=filter(Chamb.sum, Start>100), aes(label=Key), nudge_x = -50) +
+  geom_abline(slope=0.5, color="blue") + 
+  scale_color_continuous_tableau(name="Hours\n(x100)") +
+  scale_size_discrete(name="Employer\nSize") +
+  theme_UT() + labs(x="Total Volunteers", y="Volunteers\nWho Started",
+                    title="Austin's Major Employers:\nWho Volunteers At Austin Pets Alive?")
+citation.apa("Figure 01(A)")
+```
+
+Not surprisingly, The University of Texas at Austin (`UTexas`) was the largest source
+of volunteers, providing `r Chamb.sum$Start[Chamb.sum$Key=="UTexas"]` engaged 
+volunteers (out of `r Chamb.sum$Vols[Chamb.sum$Key=="UTexas"]` total volunteers) who
+have collectively logged `r Chamb.sum$Hours[Chamb.sum$Key=="UTexas"]` Hours. 
+
+For all other employers, I've provided more zoomed in plots. In 
+figure 01(C), I've labeled employers who have contributed more than 2000 hours.
+
+```{r Fig_01B}
+Chamb.sum %>%
+#   ggplot(aes(x=Start, y=Hours)) + geom_jitter(aes(color=Start/Vols)) + 
+#   xlim(c(0,40)) + ylim(c(0,3000)) + scale_color_continuous_tableau()
+  ggplot(aes(x=Vols, y=Start)) +
+  geom_jitter(aes(size=Size, color=Hours/100)) + 
+  # geom_label(data=filter(Chamb.sum, Size=="Under 1k"), aes(label=Key), nudge_x = 50) +
+  geom_label(data=filter(Chamb.sum, Start>100), aes(label=Key), nudge_x = -50) +
+  geom_abline(slope=0.5, color="blue") + 
+  scale_color_continuous_tableau(name="Hours\n(x100)") +
+  scale_size_discrete(name="Employer\nSize") +
+  xlim(0, 100) + ylim(0, 50) + 
+  theme_UT() + labs(x="Total Volunteers", y="Volunteers\nWho Started",
+                    title="Austin's Major Employers:\nWho Volunteers At Austin Pets Alive?")
+citation.apa("Figure 01(B)")
+```
+
+```{r Fig_01C}
+# require(ggvis)
+# all_values <- function(x) {
+#   if(is.null(x)) return(NULL)
+#   paste0(names(x), ": ", format(x), collapse = "<br />")
+# }
+
+Chamb.sum %>% 
+#   filter(Vols<100) %>%
+#   ggvis(x= ~Vols, y= ~Start, 
+#         fill= ~Hours/100,
+#         opacity := input_slider(0, 1)) %>% 
+#   layer_points() %>%
+#   add_tooltip(~Employer)
+  ggplot(aes(x=Vols, y=Start)) +
+  geom_jitter(aes(color=Hours/100)) + 
+  geom_text(data=filter(Chamb.sum, Start>10), aes(label=Employer, position = "dodge"), 
+             hjust=0, position = position_dodge(0.5), size=3) +
+  
+  geom_abline(slope=0.5, color="blue") + 
+  scale_color_continuous_tableau(name="Hours\n(x100)") +
+  
+  xlim(20, 100) + ylim(10, 50) + 
+  theme_UT() + labs(x="Total Volunteers", y="Volunteers\nWho Started",
+                    title="Austin's Major Employers:\nWho Volunteers At Austin Pets Alive?")
+  
+citation.apa("Figure 01(C)")
+```
+
+For your reference, below is the summary data table for all `r nrow(Chamb.sum)` 
+employers
+
+```{r Chamber Summary Table}
+Chamb.sum %>%
+  mutate(Percent = percent(Start/Vols)) %>%
+  select(Vols, Start, Hours, Percent, Hours, Size, Key, Employer) %>%
+  arrange(desc(Hours)) %>%
+  knitr::kable()
+```
+
+
+
+
+
+
+
+## What About Those Who Aren't Employed by A Large Employeer?
+
+The last couple of plots (`Figure 01 A-C`) only accounted for volunteers who 
+are employed by large companies, which is overlooking a large portion of our
+active volunteer base. In the following series, I've included a few other 
+categories that volunteers regularly list as their 'employer', specifically:
+
+1. **Student** - Any variation of student (college or high school)
+2. **Retired** - One of the demographics that often gets overlooked 
+3. **Self-Employeed** - Anyone who included *self* under employer
+4. **APA** - Staff who also do volunteer work (although it's possible they 
+are logging their paid work hours)
+5. **Unemployed** - Those who explicitly said they were unemployed (but 
+presumably  looking for work)
+6. **No employer** - Volunteers who entered a variant of *none* or *N/A*. 
+This does not include folks who left the employer field blank
+7. **Home** - Volunteers who listed *home* (and nothing more), *housewife*, 
+*stay* and *home*, or *mom*. This does not include 
+`Home Maker` (`r nrow(filter(Profiles, Employer=="Home Maker"))` volunteers), 
+`HomeAway` (`r nrow(filter(Profiles, Employer=="HomeAway"))` volunteers), or 
+`Home Depot` (`r nrow(filter(Profiles, Employer=="Home Depot"))` volunteers)
+
+In reality, this series looks at not only employer, but occupation (such as 
+`Nanny` or `Home Maker`). For simplicity, I will refer to occupation as 
+employer, but this is an important distinction to keep in mind when assessing 
+the size of each "employer".
+ 
+```{r Fig_02A}
+# semi_join(select(Profiles, Employer),
+          # top_n(select(TopEmployers, Employer, Count), 20, wt = Count)) %>%
+Profiles %>%
+  select(-Joined, -Login) %>%
+  mutate(Started = ifelse(Hours>0, 1, 0),  # 1 is true, 0 is false
+         Age = (Age%/%10)*10) %>% 
+  group_by(Employer) %>%
+  summarise(Count = n(), nStart = sum(Started), Hours=sum(Hours)) %>% 
+  ungroup() %>% 
+  filter(!is.na(Employer), Count>10) %>% top_n(20, wt=Count) %>%
+  mutate(
+    Start.Percent = nStart/Count,
+    Hours.Avg     = round(Hours/Count)) %>%
+  
+  ggplot(aes(x=Employer, y=Count, fill=Hours/1000)) + 
+  geom_bar(stat="identity") + 
+  geom_text(aes(y=0, label=paste(Count, "Vols"), group=Employer), hjust=0) +
+  coord_flip() + 
+  scale_fill_continuous_tableau(name="Total Hours\n(x1000)") + 
+  theme_UT() + labs(x="Employer", y="Number of Volunteers",
+                    title="Top 20 By Number of Volunteers")
+citation.apa("Figure 02(A)")
+```
+
+<h3>Points Worth Taking Note Of</h3>
+
+<h4>**People with 'No Employeer'** and **Students**</h4>
+
+Our largest two 'employers' are actually not employers at all; They're
+`Students` and people who said they have `No employer`. Given the 
+number of universities in the area (UTexas, TState, St Eds, ACC), and the
+traditional patterns in non-profit engagement, it's not too surprising that 
+these two groups make up such a large proportion of our volunteer base.
+Not surprising, students contribute significantly fewer total hours.
+
+<h4>**Self-Employeed** and **Unemployed**</h4>
+
+People who are `Self-employed` make up a decent proportion of our volunteer,
+which again falls in line with patterns that are common to non-profits. As
+we'll see in the following figures, this group puts in quite a few hours,
+especially considering it's relative size when compared to large groups
+like students and people with no employer.
+
+Volunteers who described themselves as `Unemployed` also show up in our 
+"Top 20 employers", as well as `Retired` volunteers. Volunteers who said
+that they are retired (which implies that they had a job, but no longer 
+are in the workforce) contribute a surprisingly massive number of hours
+especially when we consider the relatively small group size. 
+
+<h4>**General Patterns**</h4>
+
+Overall, I see a few types of employers that regularly make appearances on
+our "Top 20" list. We have a high level of engagement from people with 
+**flexible work hours** (folks who work from `Home`, are `Self-employed`, 
+`Retired`, or `Students`), a decent number of folks who are involved with 
+**education** or the **government** (`UTexas`, `AISD`, `City of Austin`, and 
+`State of Texas`), **Tech companies** (like `IBM`, `Dell`, and `AMD`), and 
+finally folks involved in the **healthcare field** (`Dell Childrens`, `St David`, 
+and `Seton`).
+
+To some degree this is reflective of the types of employers in the area, 
+but I also see that many of the top employers who are involved with APA
+are in the fields of public service (specifically, government employees,
+educators, and healthcare workers). Like I said, this may be a selection
+bias, but I can't help but suppose that this may be a reason that Austin
+Pets Alive has been able to be so successful. 
+ 
+ 
+ 
+```{r Fig_02B}
+# semi_join(select(Profiles, Employer),
+          # top_n(select(TopEmployers, Employer, Count), 20, wt = Count)) %>%
+Profiles %>%
+  select(-Joined, -Login) %>%
+  mutate(Started = ifelse(Hours>0, 1, 0),  # 1 is true, 0 is false
+         Age = (Age%/%10)*10) %>% 
+  group_by(Employer) %>%
+  summarise(Count = n(), nStart = sum(Started), Hours=sum(Hours)) %>% 
+  ungroup() %>% 
+  filter(!is.na(Employer), Count>10) %>% top_n(20, wt=Hours) %>%
+  mutate(
+    Start.Percent = nStart/Count,
+    Hours.Avg     = round(Hours/Count)) %>%
+  
+  ggplot(aes(x=Employer, y=Hours/1000, fill=Hours.Avg)) + 
+  geom_bar(stat="identity") + 
+  geom_text(aes(y=0, label=paste(Count, "Vols"), group=Employer), hjust=0) +
+  coord_flip() + 
+  scale_fill_continuous_tableau(name="Average Hours\nPer Volunteer") + 
+  theme_UT() + theme(legend.text = element_text(angle=-45)) +
+  labs(x="Employer", y="Total Number of Hours Logged\n(x1000)",
+                    title="Top 20 By Total Hours")
+citation.apa("Figure 02(B)")
+```
+
+<h3>Points Worth Taking Note Of</h3>
+<h4>**Self-Employed**, **No Employer**, and **Retired Volunteers**</h4>
+
+Both `Self-Employed` and `No Employer` volunteers contribute a high number of 
+hours (`r sum(filter(Profiles, Employer=="Self-Employed")$Hours)` and 
+`r sum(filter(Profiles, Employer=="No Employeer")$Hours)` hours, respectively),
+and rank #1 and #3 by total hours. Self-Employed volunteers have a higher 
+*average number of hours* than volunteers who are not employed, and contribute 
+just a few more hours than our retired volunteers.
+
+`Retired` volunteers take home the gold here, contributing the second highest
+number of hours with a small number of volunteers (relative to the other
+top employers). As indicated by the dark red color, this group of volunteers 
+has an incredibly high *average number of hours* per volunteer, on par `AMD`,
+`National Instruments`, and other employers with highly involved volunteers.
+Most employers with a high average rate don't have many volunteers (likely 
+because as the number of volunteers increases, the highly active volunteers 
+get "diluted" by the other volunteers who don't volunteer as much), but this 
+isn't the case for retired volunteers.
+
+
+<h4>**UTexas** vs **Students**</h4>
+
+Volunteers who listed their employer as `UTexas` contributed a similar total 
+number of hours as `Students`, but despite the relativly large disparity in
+number of volunteers. We have 
+`r round(nrow(filter(Profiles, Employer=="Student"))/nrow(filter(Profiles, Employer=="UTexas")), 1)`
+times more students than university employees). Both groups have logged 
+`r sum(filter(Profiles, Employer=="UTexas")$Hours)` (UT Employee) and
+`r sum(filter(Profiles, Employer=="Student")$Hours)` (Students) hours, putting
+them at #4 and and #5, respectively.
+
+
+<h4>**Other Observations**</h4>
+
+Beyond these top five "employers" (occupations, really), the total hours begin
+to settle out. We have `Unemployed` which is slightly larger than the remaining
+employers, but other than that, everyone else is below 2500 hours. To better 
+illustrate, the following plot (Figure 02(C)) shows a more zoomed in view:
+
+
+
+```{r Fig_02C}
+Profiles %>%
+  select(-Joined, -Login) %>%
+  mutate(Started = ifelse(Hours>0, 1, 0),  # 1 is true, 0 is false
+         Age = (Age%/%10)*10) %>% 
+  group_by(Employer) %>%
+  summarise(Count = n(), nStart = sum(Started), Hours=sum(Hours)) %>% 
+  ungroup() %>% 
+  filter(!is.na(Employer), Count>10) %>% top_n(26, wt=Hours) %>%
+  mutate(
+    Start.Percent = nStart/Count,
+    Hours.Avg     = round(Hours/Count)) %>%
+  filter(Hours<2500) %>%
+  mutate(
+    Rank=row_number(desc(Hours))) %>%
+
+  
+  ggplot(aes(x=Employer, y=Hours, fill=Hours.Avg)) + 
+  geom_bar(stat="identity") + 
+  geom_text(aes(y=0, label=paste(Count, "Vols"), group=Employer), hjust=0) +
+  geom_text(aes(label=paste("#", Rank), group=Employer), hjust=0, nudge_y=50, check_overlap = T) +
+  coord_flip() + ylim(c(0, 2500)) +
+  scale_fill_continuous_tableau(name="Average Hours\nPer Volunteer") + 
+  theme_UT() + theme(legend.text = element_text(angle=-45)) +
+  labs(x="Employer", y="Total Number of Hours Logged",
+                    title="Top 20 Employers By Total Hours\nBelow 2500 Hours")
+citation.apa("Figure 02(C)")
+```
+
+<h3>Points Worth Taking Note Of</h3>
+
+* `AMD` and `National Instruments` have some highly active volunteers (as 
+indicated by the color of the bar). I have no idea as to why, but we really
+ought to recognize them, because this level of engagment is on par with our
+retired volunteers
+* Don't read too much into the `APA` employeer, as I have no way of telling
+if these are staff who are volunteering (unpaid), or if they are mistakenly 
+logging hours when they are actually on the clock
+* I've included the rankings to the right of each bar. Technically, these are
+the rankings for employers who have less than 2500 hours logged, and not the 
+overall rankings (see Figure 02(B))
+
+
+
+```{r Fig_02D}
+# semi_join(select(Profiles, Employer),
+          # top_n(select(TopEmployers, Employer, Count), 20, wt = Count)) %>%
+Profiles %>%
+  select(-Joined, -Login) %>%
+  mutate(Started = ifelse(Hours>0, 1, 0),  # 1 is true, 0 is false
+         Age = (Age%/%10)*10) %>% 
+  group_by(Employer) %>%
+  summarise(Count = n(), nStart = sum(Started), Hours=sum(Hours)) %>% 
+  ungroup() %>% 
+  mutate(
+    Start.Percent = nStart/Count,
+    Hours.Avg     = round(Hours/Count)) %>%
+  filter(!is.na(Employer), Count>10) %>% top_n(20, wt=Start.Percent) %>%
+  
+  ggplot(aes(x=Employer, y=Start.Percent, fill=Hours.Avg)) + 
+  geom_bar(stat="identity") + 
+  geom_text(aes(y=0, label=paste(Count, "Vols"), group=Employer), hjust=0) +
+  geom_text(aes(label=paste(Hours, "Hours"), group=Employer), hjust=1, color="white") +
+  coord_flip() + 
+  scale_y_continuous(labels=percent) + 
+  scale_fill_continuous_tableau(name="Average Hours\nPer Volunteer") + 
+  theme_UT() + theme(legend.text = element_text(angle=-45)) +
+  labs(x="Employer", y="Percent of Volunteers Who\nLog Any Hours",
+                    title="Top 20 Employers By Percentage Who Start")
+citation.apa("Figure 02(D)")
+```
+
+<h3>Points Worth Taking Note Of</h3>
+
+* This plot measures the percentage of volunteers who start (i.e. log any 
+hours) in relation to the total number of volunteers from each employer. 
+This is an important measurement, because it accounts for the relative
+size of each employer/occupation
+* I've added the total number of hours for each employer on the righthand
+edge of each bar. Keep this number in mind when assessing the average number
+of hours per volunteer (the color of the bar), as this is calculated by 
+dividing the number on the right by the number on the left
+* Although ~40% may sound like a poor rate of volunteers who will start, this
+is typical for non-profits, and isn't too far off from our overall engagement
+rate (`r percent(nrow(filter(Profiles, Hours>0))/nrow(Profiles))`)
+
+
+
+# Looking at Volunteers by Ages
+
+```{r Fig_03A}
+Profiles %>% #ggplot(aes(x=Age)) + 
+  mutate(
+    Started   = ifelse(Hours>0, 1, 0),
+    Has.Hours = ifelse(Hours>0, "Has Hours", "Hasn't Started")) %>%
+  ggplot(aes(x=Age)) +
+  geom_histogram(aes(y=..count.., fill=Age.Group, color=Has.Hours), binwidth=1) +
+  geom_density(aes(y=..count..)) +
+  scale_fill_brewer(name="Age Group", palette = "Set1") +
+  scale_color_fivethirtyeight(name="Have They\nLogged Hours?") +
+  scale_x_continuous(breaks=c(12, 18, 23, 30, 40, 50, 60, 65, 70, 80)) +
+  theme_UT() + labs(y="Number of Volunteers", "Age Distribution of Volunteer",
+                    title="Count of Volunteers, By Age Group")
+citation.apa("Figure 03(A)")
+```
+
+```{r Fig_03}
+Profiles %>% 
+  filter(!is.na(Age.Group)) %>%
+  mutate(
+    Started   = ifelse(Hours>0, 1, 0),
+    Has.Hours = ifelse(Hours>0, "Has Hours", "Hasn't Started")) %>%
+  group_by(Age.Group) %>%
+  summarise(
+    Count = n(),
+    Has.Hours = sum(Started),
+    Hours = sum(Hours)) %>%
+  ggplot(aes(x=Age.Group)) +
+  geom_bar(aes(y=Hours/1000, fill=Has.Hours/Count), stat="identity") +
+  scale_fill_continuous_tableau(name="Percent Who Start", labels=percent) +
+  theme_UT() + coord_flip() + theme(legend.text = element_text(angle=-45)) +
+  labs(x="Age Group", y="Total Hours\n(x1000)",
+       title="Age Group By Total Hours")
+citation.apa("Figure 03(B)")
+```
+
+  
+```{r}
+Profiles %>%
+  filter(Hours>-1) %>%
+  ggplot(aes(x=Age, group=Age)) +
+  # geom_jitter() +
+  # geom_boxplot(aes(y=Hours), alpha=0.5) + 
+  geom_histogram(aes(alpha=Hours, fill=Age.Group), binwidth = 2) + 
+  theme_UT() + ylim(c(0, 1200))
+  # stat_quantile() #+
+  # geom_boxplot(aes(group=Age, fill=Age.Group)) + 
+  
+```
 
 > `Volunteer Engagement` is defined as having **`r HOUR_CUTOFF`+ hours** logged over the course of their time at APA.
 >
 > `Volunteer Engagement Rate` is defined as the percentage of volunteers within a praticular catergory (i.e. employer, age group) who have **`r HOUR_CUTOFF`+ hours**. 
 
-```{r Build | TopEmp}
-TopEmp <- Vols %>% 
-  mutate(Has.Hours = ifelse(Hours>HOUR_CUTOFF, 1, 0)) %>%
-  group_by(Employer) %>% 
-  summarise(
-    Sum.Hours     = sum(Hours), 
-    Num.Vols      = n(), 
-    Median        = median(Hours),
-    Num.Has.Hours = sum(Has.Hours),
-    Per.Has.Hours = sum(Has.Hours)/n(),
-    Avg.Hours.Has = sum(Hours)/sum(Has.Hours),
-    SD        = sd(Has.Hours)) %>% 
-  arrange(desc(Per.Has.Hours)) %>% ungroup() %>%
-  filter(Num.Has.Hours >= NUM_OF_VOLS_WITH_HOURS) # NUM_OF_VOLS_WITH_HOURS was 
-                                                  # set in a global chunck
-TopEmp$Employer <- as.factor(TopEmp$Employer)
 
-Vols.Abbr <- Vols %>%
-  select(Hours.Vol=Hours, Age, Weeks.Active, Employer) %>%
-  mutate(Has.Hours = ifelse(Hours.Vol>HOUR_CUTOFF, 1, 0))
-TopEmp          <- inner_join(TopEmp, Vols.Abbr)
-                              
-```
+
+
+
+
+
+
 
 ## Boxplot of Employers
 
-Box plot illustrating our distribution of volunteers by their "employers". Only employers with an average engagement rate *greater* than our overall average are shown (`r length(unique(TopEmp$Employer))` employers total). 
+Box plot illustrating our distribution of volunteers by their "employers". Only employers with an average engagement rate *greater* than our overall average are shown. 
 
 The individual points represent volunteers who are 'outliers' in comparison to their coworkers, and the area that each 'box' occupies represents the 25th to 75th percentile for each employer
 
-```{r Fig01a, fig.cap='Top Employers, Fig 1a'}
+```{r Fig01a, fig.cap='Top Employers, Fig 1a', eval=F}
 TopEmp %>% 
   filter(
     Has.Hours     == 1,
@@ -313,9 +940,9 @@ Beyond the groups mentioned above, there seems to be quite a few AISD teachers. 
 
 This figure illustrates the total contribution by total hours logged for each employer. Again, this figure only includes employers with an average engagement rate **greater** than our overall average.
 
-Keep in mind that we ought to be cautious with any generalizations derived from these two figures. I've yet to find a statistically significant relationship between employers and volunteer engagement, likely because we have *`r length(unique(Vols$Employer))` employers* listed in Vol2.
+Keep in mind that we ought to be cautious with any generalizations derived from these two figures. I've yet to find a statistically significant relationship between employers and volunteer engagement, likely because we have listed in Vol2.
 
-```{r Fig01b, fig.cap='Top Employers, Fig 1b'}
+```{r Fig01b, fig.cap='Top Employers, Fig 1b', eval=F}
 TopEmp %>% 
   ggplot(aes(x=Employer, y=Sum.Hours, group=Employer)) + 
   geom_bar(aes(y=Sum.Hours), alpha=0.25, stat="identity") + 
@@ -342,7 +969,7 @@ So in short, it doesn't tell us much more!
 
 The table below gives a more detailed glimpse into who our "top employers" might be:
 
-```{r Table1}
+```{r Table1, eval=F}
 require(scales)
 Fig1.Table <- TopEmp %>% select(Employer,
                   Employer_Total.Hours = Sum.Hours, 
@@ -371,36 +998,28 @@ knitr::kable(Fig1.Table)
 
 # Let's Investigate Age Group and Orientation (By The Month)
 
-```{r Build | ByAgeGroup}
-# Vols$Has.Hours <- ifelse(Vols$Hours>2, 1, 0) 
 
-ByAgeGroup <- Vols %>% 
-  filter(year(Orientation)==2015) %>%
-  mutate(
-    Has.Hours     = ifelse(Hours>HOUR_CUTOFF, T, F),
-    Orientation   = month(Orientation, label = T)) %>%
-  group_by(Orientation, Age.Group) %>% 
-  summarise(Total.In.Orient  = n(), 
-            Num.Start        = sum(Has.Hours), 
-            Num.Not.Start    = n() - sum(Has.Hours), 
-            Percent.Start    = sum(Has.Hours)/n(), 
-            Avg              = mean(Hours), 
-            Median           = median(Hours), 
-            SD               = sd(Hours)) %>%
-  arrange(desc(Percent.Start)) %>% ungroup()
-```
 
 ## By Age Group
 
 ### Number of Volunteers Who Started
 
-```{r Fig03, fig.cap='Volunteers who started by Age Group, Fig 3'}
-AgeGroup.Start <- ByAgeGroup %>%  
-  ggplot(aes(x=Orientation)) + 
-  geom_bar(aes(y=Num.Start, fill=Age.Group), stat="identity", position = "dodge") +
-  APA.theme + theme(legend.direction="vertical", legend.position="right") +
-  guides(fill=F) + 
-  labs(y="Number\nWho\nStarted", title="By Age Group: Who Started?")
+```{r Fig03, fig.cap='Volunteers who started by Age Group, Fig 3', eval=F}
+AgeGroup %>%  
+  ggplot(aes(x=Age.Group, y=Hours.Avg)) + 
+  geom_boxplot() +
+  geom_violin(aes(fill=Age.Group)) +
+  geom_jitter() +
+  theme_UT() + 
+  guides(fill=F) + coord_flip()
+  
+AgeGroup %>%  
+  ggplot(aes(color=Age.Group, x=nVols, y=nStart, alpha=pStart, size=pStart)) + 
+  geom_jitter() + #xlim(c(0,40)) +
+  theme_UT() + 
+  scale_alpha_continuous(labels=percent) +#theme(legend.direction="vertical", legend.position="right") +
+  guides(size=F) + coord_fixed()
+  
 
 AgeGroup.Start.Facet <- AgeGroup.Start + 
   facet_wrap("Age.Group", scales = "free", nrow=1) +
@@ -417,7 +1036,7 @@ These should be pretty self-explanatory, but pay careful attention to the y-axis
 
 ### Number of Volunteers Who *Never* Started
 
-```{r Fig04, fig.cap='Volunteers who never started by Age Group, Fig 4'}
+```{r Fig04, fig.cap='Volunteers who never started by Age Group, Fig 4', eval=F}
 AgeGroup.Not.Start <- ByAgeGroup %>%
   ggplot(aes(x=Orientation)) + 
   geom_bar(aes(y=Num.Not.Start, fill=Age.Group), stat="identity", position = "dodge") +
@@ -440,7 +1059,7 @@ These should be pretty self-explanatory, but pay careful attention to the y-axis
 
 ### Volunteer Engagement Rate (i.e. percent who started)
 
-```{r Fig05, fig.cap='Volunteer Engagement Rate by Age Group, Fig 5'}
+```{r Fig05, fig.cap='Volunteer Engagement Rate by Age Group, Fig 5', eval=F}
 ByAgeGroup.Percent <- ByAgeGroup %>%
   ggplot(aes(x=Orientation)) + 
   geom_bar(aes(y=Percent.Start, fill=Age.Group), stat="identity", position = "dodge") +
@@ -469,7 +1088,7 @@ In conjunction with Fig 3, I think it's certainly reasonable to conclude that it
 
 This figure represents **volunteer engagement** in respect to variation in `Age` (y-axis) and the `Month of Orientation` (x-axis). The transparency of each cross-sectional slice (i.e. each rectangle on the grid) is reflective of the percentage of that group that logged more than *`r HOUR_CUTOFF` hours*. 
 
-```{r Fig06a, fig.cap='Volunteer Engagement Rate: Heatmap by Age and Month of Orientation, Fig 6a'}
+```{r Fig06a, fig.cap='Volunteer Engagement Rate: Heatmap by Age and Month of Orientation, Fig 6a', eval=F}
 Vols %>% 
   mutate(Has.Hours = ifelse(Hours>HOUR_CUTOFF, 1, 0)) %>%
   mutate(
@@ -495,7 +1114,7 @@ citation.apa("Fig 6a")
 
 This figure represents **the sum of hours logged** in respect to variation in `Age` (y-axis) and the `Month of Orientation` (x-axis). They're not too much to see here, except perhaps that we have a couple volunteers 55 and older that contribute a great deal of time to APA!
 
-```{r Fig06b, fig.cap='Hour Logged: Heatmap by Age and Month of Orientation, Fig 6b'}
+```{r Fig06b, fig.cap='Hour Logged: Heatmap by Age and Month of Orientation, Fig 6b', eval=F}
 Vols %>% 
   mutate(Has.Hours = ifelse(Hours>HOUR_CUTOFF, 1, 0)) %>%
   mutate(
@@ -545,7 +1164,7 @@ To more clearly illustrate how this threshold is measuring engagement, consider 
 
 In other words, over the course of the next nine figures, we get progressively more selective in who we consider to be engaged. 
 
-```{r Fig07}
+```{r Fig07, eval=F}
 Start.By.Age <- function(num_hours, percent=TRUE) {
     df <- Vols %>% 
     mutate(Has.Hours = ifelse(Hours>num_hours, 1, 0)) %>%
@@ -582,7 +1201,7 @@ Start.By.Age <- function(num_hours, percent=TRUE) {
 }
 ```
 
-```{r Fig07-0+hours}
+```{r Fig07-0+hours, eval=F}
 grid.arrange(
   Start.By.Age(num_hours = 0, percent = FALSE),
   Start.By.Age(num_hours = 0, percent = TRUE),
@@ -590,7 +1209,7 @@ grid.arrange(
 citation.apa("Fig 7a")
 ```
 
-```{r Fig07-2+hours}
+```{r Fig07-2+hours, eval=F}
 grid.arrange(
   Start.By.Age(num_hours = 2, percent = FALSE),
   Start.By.Age(num_hours = 2, percent = TRUE),
@@ -598,7 +1217,7 @@ grid.arrange(
 citation.apa("Fig 7b")
 ```
 
-```{r Fig07-5+hours}
+```{r Fig07-5+hours, eval=F}
 grid.arrange(
   Start.By.Age(num_hours = 5, percent = FALSE) + ylim(c(0,100)),
   Start.By.Age(num_hours = 5, percent = TRUE),
@@ -606,7 +1225,7 @@ grid.arrange(
 citation.apa("Fig 7c")
 ```
 
-```{r Fig07-20+hours}
+```{r Fig07-20+hours, eval=F}
 grid.arrange(
   Start.By.Age(num_hours = 20, percent = FALSE) + ylim(c(0,100)),
   Start.By.Age(num_hours = 20, percent = TRUE),
@@ -614,7 +1233,7 @@ grid.arrange(
 citation.apa("Fig 7d")
 ```
 
-```{r Fig07-50+hours}
+```{r Fig07-50+hours, eval=F}
 grid.arrange(
   Start.By.Age(num_hours = 50, percent = FALSE) + ylim(c(0,100)),
   Start.By.Age(num_hours = 50, percent = TRUE),
@@ -622,7 +1241,7 @@ grid.arrange(
 citation.apa("Fig 7e")
 ```
 
-```{r Fig07-100+hours}
+```{r Fig07-100+hours, eval=F}
 grid.arrange(
   Start.By.Age(num_hours = 100, percent = FALSE) + ylim(c(0,100)),
   Start.By.Age(num_hours = 100, percent = TRUE),
@@ -630,7 +1249,7 @@ grid.arrange(
 citation.apa("Fig 7f")
 ```
 
-```{r Fig07-250+hours}
+```{r Fig07-250+hours, eval=F}
 grid.arrange(
   Start.By.Age(num_hours = 250, percent = FALSE) + ylim(c(0,100)),
   Start.By.Age(num_hours = 250, percent = TRUE),
@@ -638,7 +1257,7 @@ grid.arrange(
 citation.apa("Fig 7g")
 ```
 
-```{r Fig07-500+hours}
+```{r Fig07-500+hours, eval=F}
 grid.arrange(
   Start.By.Age(num_hours = 500, percent = FALSE) + ylim(c(0,100)),
   Start.By.Age(num_hours = 500, percent = TRUE),
@@ -646,7 +1265,7 @@ grid.arrange(
 citation.apa("Fig 7h")
 ```
 
-```{r Fig07-1000+hours}
+```{r Fig07-1000+hours, eval=F}
 grid.arrange(
   Start.By.Age(num_hours = 1000, percent = FALSE) + ylim(c(0,100)),
   Start.By.Age(num_hours = 1000, percent = TRUE),
@@ -689,11 +1308,23 @@ Therefore, I'm coming to the conclusion that we'd be smart marketing to the youn
 
 **Hunter Ratliff**
 
-Email: hunter.ratliff@austinpetsalive.org   
+Email: hunterratliff1@gmail.com   
 Twitter: @[HunterRatliff1](https://twitter.com/HunterRatliff1)   
+Github: [HunterRatliff1](https://github.com/hunterratliff1)   
+RPubs: [HunterRatliff1](rpubs.com/HunterRatliff1)   
+
+**Austin Pets Alive Contact Info**
+
+[Adopt](adopt@austinpetsalive.org)  |  [Donate](donate@austinpetsalive.org)  |   [Foster](mailto:foster@austinpetsalive.org)  |  [Volunteer](volunteer@austinpetsalive.org)
+
+
+[MY EMAIL](hunter.ratliff@austinpetsalive.org): Out of respect for the time of our staff/volunteers, please direct all data requests and more technical inquires to my email!
+
+
+
 
 ```
-Copyright (C) 2015 Austin Pets Alive
+Copyright (C) 2015 Hunter Ratliff, Austin Pets Alive
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -712,3 +1343,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ```
 
 This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+
+Information About the R Session at the time it was compiled (for the purposes of [Reproducible Research](https://cran.r-project.org/web/views/ReproducibleResearch.html))
+
+```{r Session_info, echo=TRUE, collapse=TRUE}
+devtools::session_info()
+```

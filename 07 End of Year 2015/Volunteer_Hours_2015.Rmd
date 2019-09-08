@@ -47,7 +47,7 @@ Hours <- readRDS("~/Github/Austin Pets Alive/07 End of Year 2015/Data/Hours.RDS"
 # saveRDS(object = Hours, file = "~/Github/Austin Pets Alive/07 End of Year 2015/Data/Hours.RDS")
 ```
 
-# TL;DR
+<h1>TL;DR</h1>
 
 * Among all volunteers, we had <b>`r sum(Hours$Duration) %>% round() %>% comma()` 
 volunteer hours</b> logged from `r min(Hours$Date.Vol) %>% format("%b %d %Y")` to 
@@ -76,6 +76,28 @@ ggplot(aes(x=Animal, y=Type, label=round(nVol))) +
   labs(x="Species", y="Activity Type")
 citation.apa("At A Glance")
 # dcast(Hours, Animal~Type)
+```
+
+```{r All Hours, fig.width=6, fig.height=12}
+df <- Hours%>%group_by(SubType, Animal) %>% 
+  summarise(
+    Hours=sum(Duration),
+    nVols=n_distinct(User.ID),
+    Avg  =round(Hours/nVols, 2))%>% ungroup() %>%
+  arrange(desc(Hours)) %>% rename(Species=Animal)
+
+df%>%ggplot(aes(x="", y=Hours, fill=SubType)) + 
+  geom_bar(stat="identity") +
+  geom_text(data=top_n(df, 13, Hours), 
+    aes(label=paste0(SubType, " (", Species,")")), 
+            stat="identity", position = "stack", vjust=1) +
+  scale_y_continuous(labels=comma) + guides(fill=guide_legend(ncol=3,byrow=TRUE)) +
+  # scale_color_fivethirtyeight() +
+  scale_fill_discrete(name="Activty\nSubtype") + labs(x="") + theme_UT() 
+
+citation.apa("All Hours")
+
+knitr::kable(df)
 ```
 
 ```{r Both, eval=F}
@@ -155,9 +177,6 @@ citation.apa("Figure 1.3")
 ```
 
 
-
-
-
 # 2. Activity Type Total Hours
 
 ## 2.1 By Species
@@ -174,12 +193,12 @@ Hours %>%
     med.Hours = round(median(Duration), 2),
     sd.Hours  = round(sd(Duration), 2),
     HrPerVol  = round(sum.Hours/nVols, 2)) %>%
-  ggplot(aes(x=Type, y=HrPerVol, fill=Animal, alpha=sum.Hours/1000)) + 
+  ggplot(aes(x=Type, y=sum.Hours/1000, fill=Animal, alpha=HrPerVol)) + 
   geom_bar(width = 1, stat="identity", color="black") + 
-  scale_alpha_continuous(name="Total Hours For Activity\n(x1000)", range=c(0.2, 1)) +
+  scale_alpha_continuous(name="Average Hours\nPer Volunteer", range=c(0.2, 1)) +
   scale_fill_brewer(name="Species", palette = "Dark2") +
   coord_polar() + theme_UT() + theme(plot.background=element_rect(fill="white")) +
-  labs(x="", y="Average Hours Per Volunteer", title="Activity Type Hours, By Species")
+  labs(x="", y="Total Hours For Activity (x1000)", title="Activity Type Hours, By Species")
 citation.apa("Figure 2.1")
 ```
 
@@ -209,9 +228,6 @@ citation.apa("Figure 2.2")
 ```
 
 
-
-
-
 # 3. Total Hours vs Number of Volunteers
 
 ## 3.1 By Activity Type
@@ -238,8 +254,6 @@ Hours %>%
 ```{r}
 plotly::ggplotly()
 ```
-
-
 
 
 # 4. Totals Over Time
@@ -305,15 +319,6 @@ citation.apa("Figure 03[C]")
 ```{r}
 plotly::ggplotly()
 ```
-
-
-
-
-
-
-
-
-
 
 
 # 5. Cumulative Hours In 2015
@@ -501,7 +506,22 @@ rm(Hours.df)
 ```  
 
 
-<h1>Contact</h1>
+# 8. Average Per Volunteer
+
+```{r Fig08}
+Hours %>% 
+  group_by(User.ID) %>%
+  summarise(
+    Hours = sum(Duration)
+  ) %>%
+  arrange(desc(Hours)) %>%
+  mutate(
+    Vol.Rank = min_rank(desc(Hours))
+  ) %>%
+  ggplot(aes(x=Vol.Rank, y=Hours)) + geom_jitter() + geom_smooth() + xlim(c(0, 1000)) + scale_y_sqrt()
+```
+
+# Contact
 
 **Hunter Ratliff**
 
@@ -521,7 +541,7 @@ RPubs: [HunterRatliff1](rpubs.com/HunterRatliff1)
 
 
 ```
-Copyright (C) 2015 Hunter Ratliff, Austin Pets Alive
+Copyright (C) 2016 Hunter Ratliff, Austin Pets Alive
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by

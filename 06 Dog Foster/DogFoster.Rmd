@@ -95,7 +95,7 @@ theme_APA <- function() {
     panel.background     = element_rect(fill="white"),
     panel.grid.major.x   = element_line(linetype = "dotted", color="#4d4d4d", size=0.50),
     panel.grid.minor.x   = element_line(linetype = "dotted", color="#4d4d4d", size=0.15),
-    panel.grid.major.y   = element_line(linetype = "dashed", color="#3A7299", size=0.50),
+    # panel.grid.major.y   = element_line(linetype = "dashed", color="#3A7299", size=0.50),
     # panel.grid.minor.y   = element_line(linetype = "dashed", color="#3A7299"),
     strip.background     = element_rect(fill="#4d4d4d"),
     strip.text           = element_text(family = "Verdana", face = "italic", color="#A7C539"),
@@ -502,7 +502,7 @@ saveRDS(ToLookup, "data/ToLookup.rds")
 rm(zip_regex, state_regex, city_regex, root_path)
 ```
 
-```{r Foster Details prep-Geocode}
+```{r Foster Details Geocode}
 ## List of all entries without NA's
 ToLookup.List <- filter(ToLookup, 
        !is.na(Street), !is.na(City), 

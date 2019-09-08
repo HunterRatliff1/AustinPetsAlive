@@ -1,0 +1,131 @@
+---
+title: "Volunteer Survey 2015"
+author: "Hunter Ratliff"
+date: "January 4, 2016"
+output: html_document
+runtime: shiny
+---
+
+<!--- SET the Globals --->
+```{r global_options, include=FALSE}
+require(knitr)
+## Define global settings for chunk output
+knitr::opts_chunk$set(fig.width=9, fig.height=9, fig.align='center',      
+                      fig.path='Figures/',                        # Sets output for figures
+                      echo=FALSE, warning=FALSE, message=FALSE)        # Silences most chunk outputs
+
+## Load required packages
+# Make a vector of the names of packages we plan to use
+packs <- c("magrittr", "dplyr", "reshape2", "ggplot2", "lubridate", "RColorBrewer",
+           "stringr", "ggthemes", "scales", "gridExtra", "googlesheets", "plotly")
+
+# Apply the require fxn to each package in list
+sapply(packs, require, character.only=TRUE)
+rm(packs)
+
+## The 'source' function runs the R script of the provided path 
+# See code:         https://github.com/HunterRatliff1/Citations
+source("~/Github/Citations/Citation Function.R")
+rm(citation.htr, citation.date)
+
+## Theme object for ggplots
+source("~/Github/utexas/diveristy/theme_UT.R")
+```
+
+```{r}
+# df.quan <- gs_title("Volunteer Surveys") %>% 
+#   gs_read_csv("2015_Quan")
+
+df.2015 <- gs_title("Volunteer Surveys") %>% 
+  gs_read_csv("2015") %>%
+  mutate(Hours.PerMonth = factor(Hours.PerMonth,
+                                 levels=c("0-5 hrs", "5-10 hrs", "10-20 hrs", 
+                                          "20-40 hrs", "40-60 hrs", 
+                                          "60-100 hrs", "100+ hrs"),
+                                  ordered = T))
+  unique(df.2015$Hours.PerMonth)
+  
+df <- df.2015 %>% select(Response.ID, Issues.Lead:Issues.Staff) %>%
+  melt(id.vars = "Response.ID", na.rm = T, variable.name = "IssueWith") %>% 
+  mutate(IssueWith = gsub("Issues.", "", IssueWith)) %>% 
+  # Add response as factor
+  left_join(as_data_frame(list(value=c(1:3), Response=c("Never", "Sometimes", "Often")))) %>%
+  mutate(Response = factor(Response, levels=c("Never", "Sometimes", "Often"), ordered = T)) %>%
+  
+  left_join(select(df.2015, Response.ID, Hours.PerMonth, Plan.To.Continue)) %>%
+  tbl_df()  
+```
+
+This R Markdown document is made interactive using Shiny. Unlike the more traditional workflow of creating static reports, you can now create documents that allow your readers to change the assumptions underlying your analysis and see the results immediately. 
+
+To learn more, see [Interactive Documents](http://rmarkdown.rstudio.com/authoring_shiny.html).
+
+## Inputs and Outputs
+
+You can embed Shiny inputs and outputs in your document. Outputs are automatically updated whenever inputs change.  This demonstrates how a standard R plot can be made interactive by wrapping it in the Shiny `renderPlot` function. The `selectInput` and `sliderInput` functions create the input widgets used to drive the plot.
+
+```{r, echo=FALSE}
+
+
+inputPanel(
+  selectInput("match_var", "Color By:", 
+                  choices = c("Monthly Hours", "Plan to continue volunteering"))
+)
+#   selectInput("n_breaks", label = "Number of bins:",
+#               choices = c(10, 20, 35, 50), selected = 20),
+#   
+#   sliderInput("bw_adjust", label = "Bandwidth adjustment:",
+#               min = 0.2, max = 2, value = 1, step = 0.2)
+
+datasetInput <- reactive({
+    switch(input$match_var,
+           "Monthly Hours" = df$Hours.PerMonth,
+           "Plan to continue volunteering" = pressure)
+  
+  
+renderPlot({
+  hist(faithful$eruptions, probability = TRUE, breaks = as.numeric(input$n_breaks),
+       xlab = "Duration (minutes)", main = "Geyser eruption duration")
+  
+  dens <- density(faithful$eruptions, adjust = input$bw_adjust)
+  lines(dens, col = "blue")
+})
+
+# inputPanel(
+#   selectInput("n_breaks", label = "Number of bins:",
+#               choices = c(10, 20, 35, 50), selected = 20),
+#   
+#   sliderInput("bw_adjust", label = "Bandwidth adjustment:",
+#               min = 0.2, max = 2, value = 1, step = 0.2)
+# )
+# 
+# renderPlot({
+#   hist(faithful$eruptions, probability = TRUE, breaks = as.numeric(input$n_breaks),
+#        xlab = "Duration (minutes)", main = "Geyser eruption duration")
+#   
+#   dens <- density(faithful$eruptions, adjust = input$bw_adjust)
+#   lines(dens, col = "blue")
+# })
+```
+
+## Embedded Application
+
+It's also possible to embed an entire Shiny application within an R Markdown document using the `shinyAppDir` function. This example embeds a Shiny application located in another directory:
+
+```{r, echo=FALSE}
+shinyAppDir(
+  system.file("examples/06_tabsets", package="shiny"),
+  options=list(
+    width="100%", height=550
+  )
+)
+```
+
+Note the use of the `height` parameter to determine how much vertical space the embedded application should occupy.
+
+You can also use the `shinyApp` function to define an application inline rather then in an external directory.
+
+In all of R code chunks above the `echo = FALSE` attribute is used. This is to prevent the R code within the chunk from rendering in the document alongside the Shiny components.
+
+
+
